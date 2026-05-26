@@ -43,7 +43,16 @@ class BPETokenizer:
         1. 특수 토큰 4개를 고정 ID 0~3에 등록합니다.
         2. byte 0~255를 ID 4~259에 bytes([byte_value]) 형태로 등록합니다.
         """
-        raise NotImplementedError("_init_special_tokens를 구현하세요.")
+        self.token_to_id.update(SPECIAL_IDS)
+        for i in range(len(SPECIAL_TOKENS)):
+            self.id_to_token[i] = SPECIAL_TOKENS[i]
+
+        # 0~255 범위의 바이트를 3개 조합하면 한글 만들기 가능
+        for i in range(256):
+            tokenid = i + 4
+            token_bytes = bytes([i])
+            self.id_to_token[tokenid] = token_bytes
+            self.token_to_id[token_bytes] = tokenid
 
     def get_pad_id(self):
         """padding 토큰 ID."""
@@ -96,7 +105,7 @@ class BPETokenizer:
         - train/load에서 얻은 merge rule을 학습 순서대로 적용합니다.
         - add_bos_eos=True이면 앞뒤에 bos/eos ID를 붙입니다.
         """
-        raise NotImplementedError("BPETokenizer.encode를 구현하세요.")
+        preprocessed = r
 
     def decode(self, ids: list[int], skip_special: bool = True) -> str:
         """
