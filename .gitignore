@@ -5,6 +5,8 @@ data/nsmc_lm_*.txt
 data/nsmc_sentiment_*.jsonl
 data/vocab_*.json
 data/*.jsonl
+data/*.tsv
+data/*.csv
 
 # Python
 __pycache__/
@@ -21,19 +23,39 @@ build/
 .ipynb_checkpoints/
 
 # 환경
+.env
+.env.*
 .venv/
 venv/
 env/
+conda-meta/
 
 # pytest
 .pytest_cache/
 .coverage
 htmlcov/
 
-# 체크포인트
+# 체크포인트/학습 산출물
 *.pt
 *.pth
+*.ckpt
 checkpoints/
+runs/
+logs/
+wandb/
+outputs/
+
+# 토크나이저/실험 산출물
+vocab.json
+merges.json
+tokenizer.json
+tokenizer_*.json
+
+# 비밀값
+*.pem
+*.key
+*token*
+*secret*
 
 # 과제 안내문 (로컬/Notion 전용, repo에 미포함)
 notion/
