@@ -3,6 +3,7 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 
 class MultiHeadAttention(nn.Module):
@@ -30,8 +31,11 @@ class MultiHeadAttention(nn.Module):
         self.d_model = d_model
         self.n_heads = n_heads
         self.head_dim = d_model // n_heads
-        # TODO: qkv projection, output projection, dropout을 정의하세요.
-        raise NotImplementedError("MultiHeadAttention.__init__을 구현하세요.")
+        self.q_proj = nn.Linear(d_model, d_model, bias=qkv_bias)
+        self.k_proj = nn.Linear(d_model, d_model, bias=qkv_bias)
+        self.v_proj = nn.Linear(d_model, d_model, bias=qkv_bias)
+        self.out_proj = nn.Linear(d_model, d_model)
+        self.dropout = nn.Dropout(drop_rate)
 
     def forward(
         self,
@@ -47,4 +51,33 @@ class MultiHeadAttention(nn.Module):
             causal_mask: True이면 미래 위치를 볼 수 없게 mask 처리
             return_attention_weights: True이면 attention weight도 함께 반환
         """
-        raise NotImplementedError("MultiHeadAttention.forward를 구현하세요.")
+        batch_size, seq_len, _ = x.shape
+
+        q = self.q_proj(x)
+        k = self.k_proj(x)
+        v = self.v_proj(x)
+
+        q = q.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        k = k.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+        v = v.view(batch_size, seq_len, self.n_heads, self.head_dim).transpose(1, 2)
+
+        attn_scores = q @ k.transpose(-2, -1)
+        attn_scores = attn_scores / (self.head_dim ** 0.5)
+
+        if causal_mask:
+            mask = torch.triu(
+                torch.ones(seq_len, seq_len, dtype=torch.bool, device=x.device),
+                diagonal=1,
+            )
+            attn_scores = attn_scores.masked_fill(mask, float("-inf"))
+
+        attn_weights = F.softmax(attn_scores, dim=-1)
+        attn_weights = self.dropout(attn_weights)
+
+        context = attn_weights @ v
+        context = context.transpose(1, 2).contiguous().view(batch_size, seq_len, self.d_model)
+        out = self.out_proj(context)
+
+        if return_attention_weights:
+            return out, attn_weights
+        return out

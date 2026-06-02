@@ -17,7 +17,10 @@ def calc_loss_batch(
     device: torch.device,
 ) -> torch.Tensor:
     """TODO: 한 배치를 device로 옮긴 뒤 다음 토큰 예측 cross entropy loss를 계산합니다."""
-    raise NotImplementedError("calc_loss_batch를 구현하세요.")
+    input_batch = input_batch.to(device)
+    target_batch = target_batch.to(device)
+    loss, _ = model(input_batch, targets=target_batch)
+    return loss
 
 
 def calc_loss_loader(
@@ -27,7 +30,24 @@ def calc_loss_loader(
     num_batches: int | None = None,
 ) -> float:
     """TODO: data_loader의 평균 loss를 계산합니다. 검증에서는 torch.no_grad()를 사용하세요."""
-    raise NotImplementedError("calc_loss_loader를 구현하세요.")
+    if len(data_loader) == 0:
+        return float("nan")
+
+    total_loss = 0.0
+    batches_seen = 0
+    max_batches = len(data_loader) if num_batches is None else min(num_batches, len(data_loader))
+
+    model.eval()
+    with torch.no_grad():
+        for input_batch, target_batch in data_loader:
+            if batches_seen >= max_batches:
+                break
+            loss = calc_loss_batch(input_batch, target_batch, model, device)
+            total_loss += loss.item()
+            batches_seen += 1
+
+    model.train()
+    return total_loss / batches_seen
 
 
 def save_checkpoint(
@@ -38,7 +58,13 @@ def save_checkpoint(
     path: str,
 ) -> None:
     """TODO: model/optimizer 상태, epoch, global_step을 torch.save로 저장합니다."""
-    raise NotImplementedError("save_checkpoint를 구현하세요.")
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "epoch": epoch,
+        "global_step": global_step,
+    }
+    torch.save(checkpoint, path)
 
 
 def load_checkpoint(
@@ -48,7 +74,11 @@ def load_checkpoint(
     device: torch.device,
 ) -> tuple[int, int]:
     """TODO: torch.load로 checkpoint를 읽어 model/optimizer 상태를 복원합니다."""
-    raise NotImplementedError("load_checkpoint를 구현하세요.")
+    checkpoint = torch.load(path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    if optimizer is not None and "optimizer_state_dict" in checkpoint:
+        optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    return checkpoint.get("epoch", 0), checkpoint.get("global_step", 0)
 
 
 def generate(
@@ -61,7 +91,35 @@ def generate(
     eos_id: int | None = None,
 ) -> torch.Tensor:
     """TODO: temperature와 top-k 샘플링을 지원하는 생성 함수를 구현합니다."""
-    raise NotImplementedError("generate를 구현하세요.")
+    model.eval()
+    for _ in range(max_new_tokens):
+        idx_cond = idx[:, -context_size:]
+        with torch.no_grad():
+            logits = model(idx_cond)
+        logits = logits[:, -1, :]
+
+        if top_k is not None:
+            top_values, _ = torch.topk(logits, min(top_k, logits.size(-1)))
+            min_top_value = top_values[:, [-1]]
+            logits = torch.where(
+                logits < min_top_value,
+                torch.full_like(logits, float("-inf")),
+                logits,
+            )
+
+        if temperature <= 0:
+            idx_next = torch.argmax(logits, dim=-1, keepdim=True)
+        else:
+            probs = torch.softmax(logits / temperature, dim=-1)
+            idx_next = torch.multinomial(probs, num_samples=1)
+
+        if eos_id is not None and torch.all(idx_next == eos_id):
+            idx = torch.cat((idx, idx_next), dim=1)
+            break
+
+        idx = torch.cat((idx, idx_next), dim=1)
+
+    return idx
 
 
 def generate_and_print_sample(
@@ -75,7 +133,19 @@ def generate_and_print_sample(
     top_k: int | None = 40,
 ) -> None:
     """TODO: start_context를 encode하고 generate 후 decode하여 출력합니다."""
-    raise NotImplementedError("generate_and_print_sample을 구현하세요.")
+    model.eval()
+    encoded = tokenizer.encode(start_context, add_bos_eos=False)
+    idx = torch.tensor(encoded, dtype=torch.long, device=device).unsqueeze(0)
+    token_ids = generate(
+        model,
+        idx,
+        max_new_tokens=max_new_tokens,
+        context_size=context_size,
+        temperature=temperature,
+        top_k=top_k,
+        eos_id=tokenizer.get_eos_id() if hasattr(tokenizer, "get_eos_id") else None,
+    )
+    print(tokenizer.decode(token_ids[0].tolist(), skip_special=True))
 
 
 def train_model(
@@ -94,7 +164,42 @@ def train_model(
     global_step: int = 0,
 ) -> list[float]:
     """TODO: 사전 학습 루프를 구현하고 epoch별 train loss 리스트를 반환합니다."""
-    raise NotImplementedError("train_model을 구현하세요.")
+    train_losses = []
+
+    model.to(device)
+    for epoch in range(start_epoch, start_epoch + num_epochs):
+        model.train()
+        total_loss = 0.0
+        batches_seen = 0
+
+        for input_batch, target_batch in train_loader:
+            optimizer.zero_grad()
+            loss = calc_loss_batch(input_batch, target_batch, model, device)
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+            batches_seen += 1
+            global_step += 1
+
+            if eval_freq and global_step % eval_freq == 0 and val_loader is not None:
+                calc_loss_loader(val_loader, model, device, num_batches=eval_iter)
+
+            if ckpt_freq and global_step % ckpt_freq == 0:
+                save_checkpoint(model, optimizer, epoch, global_step, f"checkpoint_step_{global_step}.pt")
+
+        train_losses.append(total_loss / max(1, batches_seen))
+
+        if tokenizer is not None and start_context:
+            generate_and_print_sample(
+                model,
+                tokenizer,
+                device,
+                start_context,
+                context_size=model.config.get("context_length", 256),
+            )
+
+    return train_losses
 
 
 def plot_losses(train_losses: list[float], val_losses: list[float] | None = None) -> None:
