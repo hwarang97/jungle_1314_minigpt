@@ -4,9 +4,9 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| 반 | (예: AI 1반) |
-| 팀명 | (예: 3팀) |
-| 팀원 | (예: 홍길동, 김철수) |
+| 반 | 작성 필요 |
+| 팀명 | 작성 필요 |
+| 팀원 | 작성 필요 |
 
 ---
 
@@ -14,12 +14,12 @@
 
 | 단계 | 구현 내용 | 구현 파일 | 담당자 |
 | --- | --- | --- | --- |
-| 1 | UTF-8 byte-level BPE tokenizer | `src/bpe.py` |  |
-| 2 | GPTDataset, create_dataloader, InputEmbedding | `src/dataset.py`, `src/embeddings.py` |  |
-| 3 | MultiHeadAttention, causal mask | `src/attention.py` |  |
-| 4 | LayerNorm, GELU, FeedForward, TransformerBlock, GPTModel, generate_text_simple | `src/model.py` |  |
-| 5 | loss 계산, checkpoint, generate, train_model | `src/train.py` |  |
-| 6 | NSMC 감성 분류 Dataset과 classifier | `src/finetune.py` |  |
+| 1 | UTF-8 byte-level BPE tokenizer 구현 완료 | `src/bpe.py` | 작성 필요 |
+| 2 | GPTDataset, create_dataloader, InputEmbedding 구현 완료 | `src/dataset.py`, `src/embeddings.py` | 작성 필요 |
+| 3 | MultiHeadAttention, causal mask 구현 완료 | `src/attention.py` | 작성 필요 |
+| 4 | LayerNorm, GELU, FeedForward, TransformerBlock, GPTModel, generate_text_simple 구현 완료 | `src/model.py` | 작성 필요 |
+| 5 | loss 계산, checkpoint, generate, train_model 구현 완료 | `src/train.py` | 작성 필요 |
+| 6 | NSMC 감성 분류 Dataset과 classifier 구현 완료 | `src/finetune.py` | 작성 필요 |
 
 ---
 
@@ -27,19 +27,20 @@
 
 | 실행 명령 | 결과 | 비고 |
 | --- | --- | --- |
-| `pytest tests/test_bpe.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/test_dataset.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/test_attention.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/test_model.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/test_train.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/test_finetune.py -v` | 통과 / 실패 / 미실행 |  |
-| `pytest tests/ -v` | 통과 / 실패 / 미실행 |  |
+| `pytest tests/test_bpe.py -v` | 통과 | 6 passed |
+| `pytest tests/test_dataset.py -v` | 통과 | 4 passed |
+| `pytest tests/test_attention.py -v` | 통과 | 2 passed |
+| `pytest tests/test_model.py -v` | 통과 | 7 passed |
+| `pytest tests/test_train.py -v` | 통과 | 5 passed, matplotlib 비대화형 backend warning 1건 |
+| `pytest tests/test_finetune.py -v` | 통과 | 4 passed |
+| `pytest tests/ -v` | 통과 | 28 passed, matplotlib 비대화형 backend warning 1건 |
 
-실패한 테스트가 있다면 에러 요약을 적습니다.
+테스트는 원본 프로젝트의 `.venv` Python 3.11.15 환경에서 실행했습니다.
+Codex 샌드박스 내부에서는 Windows 임시 폴더 권한 문제로 `tempfile.TemporaryDirectory()`를 쓰는 테스트가 실패했으나, 샌드박스 밖에서 동일 명령을 실행했을 때 전체 테스트가 통과했습니다.
 
 | 실패한 테스트 | 에러 요약 | 해결 시도 |
 | --- | --- | --- |
-| (예: `test_train.py::TestGenerate::test_generate_shape`) |  |  |
+| 없음 | 없음 | 전체 테스트 통과 |
 
 ---
 
@@ -52,7 +53,7 @@
 | 사전 학습 데이터 | `data/nsmc_lm_train.txt`, `data/nsmc_lm_val.txt` |
 | 미세 조정 데이터 | `data/nsmc_sentiment_train.jsonl`, `data/nsmc_sentiment_val.jsonl`, `data/nsmc_sentiment_test.jsonl` |
 | 전처리 방식 | 빈 리뷰 제거, 공백 정리, train/validation 분리 |
-| 사용한 데이터 크기 | Smoke / Light / Basic 중 선택 |
+| 사용한 데이터 크기 | 실제 NSMC 다운로드/학습은 미실행. Colab에서 Smoke -> Light -> Basic 순서로 확장 권장 |
 
 ---
 
@@ -64,11 +65,11 @@
 | BPE 방식 | UTF-8 byte-level BPE |
 | 특수 토큰 ID | `<pad>=0`, `<unk>=1`, `<bos>=2`, `<eos>=3` |
 | byte token ID 범위 | 4~259 |
-| vocab_size | (예: 3000) |
-| 학습 corpus 크기 | (예: `corpus[:1_500_000]`) |
-| 어휘 학습 시간 | (예: Colab CPU Basic 설정 35분) |
-| vocabulary 저장 경로 | (예: `data/nsmc_bpe_vocab_3000.json`) |
-| 인코딩/디코딩 복원 예시 | (예: `decode(encode("이 영화는 좋았다")) == 원문`) |
+| vocab_size | 테스트 기준 300, 제출 학습 시 Basic 예시 3000 권장 |
+| 학습 corpus 크기 | 테스트는 소량 문자열, 제출 학습 시 `corpus[:1_500_000]` 권장 |
+| 어휘 학습 시간 | 실제 전체 데이터 학습 미실행 |
+| vocabulary 저장 경로 | 제출 학습 시 예: `data/nsmc_bpe_vocab_3000.json` |
+| 인코딩/디코딩 복원 예시 | 테스트에서 한국어/영어 혼합 문장 encode -> decode 복원 확인 |
 
 ---
 
@@ -78,14 +79,14 @@
 | --- | --- |
 | 구현 파일 | `src/model.py` |
 | 전체 구조 | InputEmbedding -> N x TransformerBlock -> LayerNorm -> LM head |
-| vocab_size | (예: 3000) |
-| context_length | (예: 128) |
-| emb_dim | (예: 192) |
-| n_heads | (예: 4) |
-| n_layers | (예: 4) |
-| drop_rate | (예: 0.1) |
-| qkv_bias | True / False |
-| 총 파라미터 수 | (계산식 포함) |
+| vocab_size | 실제 학습 설정 작성 필요 |
+| context_length | 실제 학습 설정 작성 필요 |
+| emb_dim | 실제 학습 설정 작성 필요 |
+| n_heads | 실제 학습 설정 작성 필요 |
+| n_layers | 실제 학습 설정 작성 필요 |
+| drop_rate | 실제 학습 설정 작성 필요 |
+| qkv_bias | 실제 학습 설정 작성 필요 |
+| 총 파라미터 수 | 실제 학습 설정 기준 계산 필요 |
 
 ---
 
@@ -128,8 +129,8 @@
 | batch_size | (예: 16) |
 | backbone learning rate |  |
 | classifier learning rate |  |
-| validation loss / accuracy |  |
-| test loss / accuracy |  |
+| validation loss / accuracy | 실제 미세 조정 학습 후 작성 필요 |
+| test loss / accuracy | 실제 미세 조정 학습 후 작성 필요 |
 | 오류 예시 | 틀린 리뷰 예시와 추정 원인 |
 
 ---
@@ -138,11 +139,11 @@
 
 | 항목 | 내용 |
 | --- | --- |
-| Python | (예: Python 3.11) |
-| PyTorch | (예: PyTorch 2.x) |
-| 실행 환경 | Colab GPU / Colab CPU / 로컬 |
-| GPU/CPU 정보 |  |
-| 총 학습 소요 시간 |  |
+| Python | 테스트 환경: Python 3.11.15 |
+| PyTorch | 설치 환경 기준 |
+| 실행 환경 | 로컬 단위 테스트 완료, 실제 학습은 Colab GPU 권장 |
+| GPU/CPU 정보 | 실제 학습 환경 작성 필요 |
+| 총 학습 소요 시간 | 실제 학습 후 작성 필요 |
 
 ---
 
