@@ -233,3 +233,86 @@ python download_data.py
 - 동작하는 `src/` 소스 코드
 - 실행 가능한 `gpt-lab.ipynb`
 - `REPORT.md`
+
+---
+
+## 9. Colab 실제 학습 실행 방법
+
+`gpt-lab.ipynb`에는 빠른 확인용 설정과 실제 학습용 설정이 함께 들어 있습니다.
+
+### 9.1 실행 규모 선택
+
+노트북의 `## 2.5 Run Level Settings` 셀에서 아래 값을 바꿉니다.
+
+```python
+RUN_LEVEL = "LIGHT"
+```
+
+또는:
+
+```python
+RUN_LEVEL = "BASIC"
+```
+
+권장 순서:
+
+1. 먼저 `LIGHT`로 전체 흐름이 정상인지 확인합니다.
+2. 정상 작동하면 `BASIC`으로 바꿔 발표/제출용 기록을 만듭니다.
+
+`LIGHT`는 빠르게 구조를 확인하는 용도이고, `BASIC`은 더 큰 말뭉치와 모델 설정으로 실제 결과를 남기는 용도입니다.
+
+### 9.2 사전학습 실행
+
+`## 7.5 Actual Pretraining Run` 셀에서 아래 값을 바꿉니다.
+
+```python
+RUN_ACTUAL_PRETRAIN = True
+```
+
+이 셀을 실행하면 다음 파일에 기록이 저장됩니다.
+
+```text
+logs/pretrain_metrics.jsonl
+logs/pretrain_samples.jsonl
+```
+
+확인 명령:
+
+```python
+!tail -n 20 logs/pretrain_metrics.jsonl
+!tail -n 5 logs/pretrain_samples.jsonl
+```
+
+`pretrain_metrics.jsonl`에는 train loss, validation loss가 저장되고, `pretrain_samples.jsonl`에는 중간 생성 문장이 저장됩니다.
+
+### 9.3 감성 분류 fine-tuning 실행
+
+사전학습이 끝난 뒤 `## 8.5 Actual Sentiment Fine-Tuning Run` 셀에서 아래 값을 바꿉니다.
+
+```python
+RUN_ACTUAL_FINETUNE = True
+```
+
+이 셀을 실행하면 다음 파일에 기록이 저장됩니다.
+
+```text
+logs/sentiment_metrics.jsonl
+```
+
+확인 명령:
+
+```python
+!tail -n 20 logs/sentiment_metrics.jsonl
+```
+
+여기에는 train loss, validation loss, test loss, accuracy가 저장됩니다.
+
+### 9.4 발표 때 확인할 결과
+
+발표나 제출 전에는 최소한 아래 세 가지를 확인합니다.
+
+1. `logs/pretrain_metrics.jsonl`: train loss / validation loss가 어떻게 변했는지
+2. `logs/pretrain_samples.jsonl`: 학습 중 생성된 문장이 어떻게 바뀌었는지
+3. `logs/sentiment_metrics.jsonl`: fine-tuning 이후 validation/test accuracy가 얼마인지
+
+실행이 너무 오래 걸리면 `RUN_LEVEL = "LIGHT"`로 먼저 결과를 만들고, 시간이 남을 때 `RUN_LEVEL = "BASIC"`으로 다시 실행합니다.
