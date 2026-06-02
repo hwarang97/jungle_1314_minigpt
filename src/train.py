@@ -6,8 +6,10 @@ import torch
 from pathlib import Path
 
 try:
+    from .metrics import append_jsonl_record
     from .model import GPTModel
 except ImportError:
+    from metrics import append_jsonl_record
     from model import GPTModel
 
 
@@ -188,7 +190,7 @@ def generate_and_print_sample(
     context_size: int = 256,
     temperature: float = 0.8,
     top_k: int | None = 40,
-) -> None:
+) -> str:
     """
     start_context를 encode하고 generate 후 decode하여 출력합니다.
 
@@ -197,6 +199,7 @@ def generate_and_print_sample(
     2. batch 차원을 추가합니다.
     3. generate로 새 token을 이어 붙입니다.
     4. tokenizer.decode로 사람이 읽는 문자열로 복원해 출력합니다.
+    5. 같은 문자열을 기록용으로 반환합니다.
     """
     model.eval()
     encoded = tokenizer.encode(start_context, add_bos_eos=False)
@@ -211,7 +214,9 @@ def generate_and_print_sample(
         top_k=top_k,
         eos_id=getattr(tokenizer, "get_eos_id", lambda: None)(),
     )
-    print(tokenizer.decode(out[0].tolist(), skip_special=True))
+    text = tokenizer.decode(out[0].tolist(), skip_special=True)
+    print(text)
+    return text
 
 
 def train_model(
@@ -228,6 +233,8 @@ def train_model(
     ckpt_freq: int | None = None,
     start_epoch: int = 0,
     global_step: int = 0,
+    metrics_path: str | Path | None = "logs/pretrain_metrics.jsonl",
+    sample_path: str | Path | None = "logs/pretrain_samples.jsonl",
 ) -> list[float]:
     """
     사전 학습 루프를 실행하고 epoch별 train loss 리스트를 반환합니다.
@@ -240,6 +247,7 @@ def train_model(
     5. ckpt_freq마다 checkpoint를 저장합니다.
     6. epoch 평균 train loss를 기록합니다.
     7. start_context가 있으면 샘플 생성을 출력합니다.
+    8. metrics_path/sample_path가 있으면 loss와 생성 샘플을 JSONL로 저장합니다.
     """
     model.to(device)
     train_losses = []
@@ -269,21 +277,57 @@ def train_model(
                     val_eval = calc_loss_loader(val_loader, model, device, num_batches=eval_iter)
                     print(f"step {global_step}: train loss {train_eval:.4f}, val loss {val_eval:.4f}")
                 else:
+                    val_eval = None
                     print(f"step {global_step}: train loss {train_eval:.4f}")
+
+                append_jsonl_record(
+                    metrics_path,
+                    {
+                        "stage": "pretrain",
+                        "event": "eval",
+                        "epoch": epoch,
+                        "global_step": global_step,
+                        "train_loss": train_eval,
+                        "val_loss": val_eval,
+                        "eval_iter": eval_iter,
+                    },
+                )
 
             if ckpt_freq and global_step % ckpt_freq == 0:
                 # 긴 Colab 학습이 끊겨도 이어갈 수 있도록 주기적으로 checkpoint를 저장합니다.
                 save_checkpoint(model, optimizer, epoch=epoch, global_step=global_step, path=f"checkpoints/ckpt_step_{global_step}.pt")
 
-        train_losses.append(total_loss / batch_count if batch_count else float("nan"))
+        epoch_train_loss = total_loss / batch_count if batch_count else float("nan")
+        train_losses.append(epoch_train_loss)
+        append_jsonl_record(
+            metrics_path,
+            {
+                "stage": "pretrain",
+                "event": "epoch",
+                "epoch": epoch,
+                "global_step": global_step,
+                "train_loss": epoch_train_loss,
+            },
+        )
         if start_context:
-            generate_and_print_sample(
+            generated_text = generate_and_print_sample(
                 model,
                 tokenizer,
                 device,
                 start_context,
                 max_new_tokens=20,
                 context_size=model.config["context_length"],
+            )
+            append_jsonl_record(
+                sample_path,
+                {
+                    "stage": "pretrain",
+                    "event": "sample",
+                    "epoch": epoch,
+                    "global_step": global_step,
+                    "start_context": start_context,
+                    "generated_text": generated_text,
+                },
             )
 
     return train_losses

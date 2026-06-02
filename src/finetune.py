@@ -12,8 +12,10 @@ import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 try:
+    from .metrics import append_jsonl_record
     from .model import GPTModel
 except ImportError:
+    from metrics import append_jsonl_record
     from model import GPTModel
 
 
@@ -185,6 +187,8 @@ def train_epoch_sentiment(
     train_loader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
+    epoch: int | None = None,
+    metrics_path: str | Path | None = "logs/sentiment_metrics.jsonl",
 ) -> tuple[float, float]:
     """
     감성 분류 모델을 1 epoch 훈련하고 (평균 loss, accuracy)를 반환합니다.
@@ -195,6 +199,7 @@ def train_epoch_sentiment(
     3. loss를 계산하고 backward/step을 수행합니다.
     4. batch loss와 맞힌 개수를 누적합니다.
     5. 평균 loss와 accuracy를 반환합니다.
+    6. metrics_path가 있으면 train loss/accuracy를 JSONL로 저장합니다.
     """
     model.train()
     total_loss = 0.0
@@ -216,13 +221,30 @@ def train_epoch_sentiment(
         correct += (logits.argmax(dim=-1) == labels).sum().item()
         total += labels.size(0)
 
-    return (total_loss / total if total else float("nan"), correct / total if total else 0.0)
+    avg_loss = total_loss / total if total else float("nan")
+    accuracy = correct / total if total else 0.0
+    append_jsonl_record(
+        metrics_path,
+        {
+            "stage": "sentiment",
+            "event": "train_epoch",
+            "split": "train",
+            "epoch": epoch,
+            "loss": avg_loss,
+            "accuracy": accuracy,
+            "num_examples": total,
+        },
+    )
+    return avg_loss, accuracy
 
 
 def evaluate_sentiment(
     model: GPTForSequenceClassification,
     data_loader,
     device: torch.device,
+    split: str = "eval",
+    epoch: int | None = None,
+    metrics_path: str | Path | None = "logs/sentiment_metrics.jsonl",
 ) -> tuple[float, float]:
     """
     감성 분류 모델을 평가하고 (평균 loss, accuracy)를 반환합니다.
@@ -232,6 +254,7 @@ def evaluate_sentiment(
     2. no_grad로 batch를 순회합니다.
     3. loss와 logits를 계산합니다.
     4. 평균 loss와 accuracy를 누적해 반환합니다.
+    5. metrics_path가 있으면 평가 loss/accuracy를 JSONL로 저장합니다.
     """
     model.eval()
     total_loss = 0.0
@@ -248,4 +271,18 @@ def evaluate_sentiment(
             correct += (logits.argmax(dim=-1) == labels).sum().item()
             total += labels.size(0)
 
-    return (total_loss / total if total else float("nan"), correct / total if total else 0.0)
+    avg_loss = total_loss / total if total else float("nan")
+    accuracy = correct / total if total else 0.0
+    append_jsonl_record(
+        metrics_path,
+        {
+            "stage": "sentiment",
+            "event": "evaluate",
+            "split": split,
+            "epoch": epoch,
+            "loss": avg_loss,
+            "accuracy": accuracy,
+            "num_examples": total,
+        },
+    )
+    return avg_loss, accuracy
