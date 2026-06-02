@@ -30,6 +30,9 @@ DEFAULT_SEED = 42
 
 
 def _download(url: str, path: str) -> None:
+    # 흐름(의사코드):
+    # 1. 파일이 이미 있으면 다운로드를 건너뜁니다.
+    # 2. 없으면 URL에서 파일을 받아 지정 경로에 저장합니다.
     if os.path.isfile(path):
         print(f"이미 존재합니다: {path}")
         return
@@ -39,12 +42,21 @@ def _download(url: str, path: str) -> None:
 
 
 def _clean_text(text: str | None) -> str:
+    # 흐름(의사코드):
+    # 1. None이면 빈 문자열로 처리합니다.
+    # 2. 여러 공백/줄바꿈을 공백 하나로 줄입니다.
+    # 3. 앞뒤 공백을 제거합니다.
     if text is None:
         return ""
     return re.sub(r"\s+", " ", text).strip()
 
 
 def _read_nsmc_tsv(path: str | Path) -> list[dict]:
+    # 흐름(의사코드):
+    # 1. TSV 파일을 DictReader로 읽습니다.
+    # 2. document를 정리하고 label을 확인합니다.
+    # 3. 빈 리뷰나 잘못된 label은 버립니다.
+    # 4. {"text": 리뷰, "label": 0/1} 형태로 모읍니다.
     rows: list[dict] = []
     with open(path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f, delimiter="\t")
@@ -58,12 +70,19 @@ def _read_nsmc_tsv(path: str | Path) -> list[dict]:
 
 
 def _write_jsonl(path: str | Path, rows: list[dict]) -> None:
+    # 흐름(의사코드):
+    # 1. 출력 파일을 엽니다.
+    # 2. row 하나를 JSON 문자열 한 줄로 저장합니다.
     with open(path, "w", encoding="utf-8") as f:
         for row in rows:
             f.write(json.dumps(row, ensure_ascii=False) + "\n")
 
 
 def _write_lm_files(rows: list[dict], lm_char_limit: int, val_ratio: float) -> None:
+    # 흐름(의사코드):
+    # 1. 리뷰 text를 lm_char_limit까지 모읍니다.
+    # 2. val_ratio 기준으로 train/val 텍스트를 나눕니다.
+    # 3. language model용 txt 파일 두 개로 저장합니다.
     texts: list[str] = []
     total_chars = 0
     for row in rows:
@@ -90,6 +109,13 @@ def prepare_data(
 ) -> dict[str, str]:
     """
     NSMC 원본 TSV를 과제용 LM 텍스트와 감성 분류 JSONL로 변환합니다.
+
+    흐름(의사코드):
+    1. 원본 train/test TSV를 읽고 정리합니다.
+    2. train rows를 seed 기준으로 섞습니다.
+    3. validation split을 만듭니다.
+    4. language model용 txt를 저장합니다.
+    5. sentiment classification용 jsonl을 저장합니다.
 
     Returns:
         생성된 주요 파일 경로 딕셔너리
@@ -123,6 +149,10 @@ def prepare_data(
 
 
 def main():
+    # 흐름(의사코드):
+    # 1. data 폴더를 만듭니다.
+    # 2. NSMC 원본 파일을 다운로드합니다.
+    # 3. 과제용 데이터 파일을 생성합니다.
     os.makedirs(DATA_DIR, exist_ok=True)
     _download(NSMC_TRAIN_URL, RAW_TRAIN_PATH)
     _download(NSMC_TEST_URL, RAW_TEST_PATH)
