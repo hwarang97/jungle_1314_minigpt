@@ -31,8 +31,8 @@ env/
 htmlcov/
 
 # 체크포인트
-*.pt
-*.pth
+# *.pt
+# *.pth
 # checkpoints/
 
 # 학습 기록(로컬/Colab 실행 결과)
