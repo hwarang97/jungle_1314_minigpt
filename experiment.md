@@ -127,11 +127,62 @@ train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선
 #### 7.2 Fine-tuning 결과
 ![sentimental](figures/sentimental%20predict%20result.png) 
 
-## 8. 관찰
-- train loss는 감소했는가?
-- validation loss는 언제부터 증가했는가?
-- validation accuracy는 개선되었는가?
-- early stopping이 어느 epoch에서 걸렸는가?
+#### 7.3 결과 분석
+과적합이 문제라 생각해 lr, drop을 적용해보았지만 개선되는 모습을 확인하지 못했다.
+따라서 어떤 데이터에서 문제가 생기는지를 확인해보았다.
+![confision-matrix](figures/confusion_matrix_sentiment_affine_lr1e-4_train35000_test.png) 
+confision-matirx를 참고하면, 어느쪽으로 오류가 어느쪽으로 치우지지 않고 있다. 학습이 한쪽으로 치우치게 진행되지는 않았다는걸 확인했다.
+
+틀리는 경우가 어떤 경우인지 샘플을 확인해보고 다음 결론을 얻었다.
+1. 데이터가 애매한 경우
+2. 의미가 반전되는 경우
+
+애매한 데이터 예시1) "그래도 액션은 볼만했음~ㅎㅎ”
+
+실제 label: 부정
+모델 예측: 긍정
+confidence: 0.995
+문장만 보면 꽤 긍정적으로 보인다. 해당 댓글만 보고는 긍정인지 부정인지 판단하기가 모호하다. 충분히 헷갈릴만한 데이터로 보인다.
+
+의미 반전 예시1) “불륜은 싫지만 이 영화는 도대체 싫어할수가 없다.”
+
+실제 label: 긍정
+모델 예측: 부정
+confidence: 0.995
+이 문장은 전체적으로는 긍정이지만, 앞부분에 불륜은 싫지만이라는 강한 부정 표현이 있다. 모델은 문장 전체의 반전 의미보다 부정 단어에 더 강하게 반응한 것으로 보인다.
+
+의미 반전 예시3) “어정쩡 하게 끝나는 내용 그리고 지루했으나.. 많은 생각을 들게 해준 영화같다..”
+
+실제 label: 긍정
+모델 예측: 부정
+여기서도 어정쩡, 지루했으나 같은 부정 표현이 앞에 나오고, 긍정적 해석은 뒤쪽에 나온다. 현재 모델은 이런 “부정 표현 이후 긍정 결론”을 충분히 잘 처리하지 못하는 것 같다.
+
+결론: 모델이 문장 전체의 감정보다 일부 강한 부정 표현에 끌리는 경향이 있다.
+이 결과를 보면 모델은 명확한 긍정/부정 문장은 잘 맞춘다.
+하지만 실제 긍정 리뷰 안에 부정 단어가 섞여 있거나, 문장 후반부에서 의미가 반전되는 경우에는 특정 단어에 크게 의존해 의미를 제대로 파악하지 못한다.
+
+#### 7.4 개선 방향
+1. 분류에 사용되는 레이어 추가
+2. context_length 증가
+3. num_multihead 증가
+
+<1번 근거>
+분류에는 LinearLayer 층 하나만 사용되고 있다. fine-tuning을 통해 학습이 되고 있는데, 반전되는 의미를 이해하기에 복잡도가 작을 수 있겠다는 생각이 들었다. perceptron에서 층 1개로 XOR 연산을 만들수 없던것처럼, 어쩌면 층이 부족해 의미 반전이 어렵지 않나 생각이 들었다. 따라서 Linear-Layer(192->192) 를 추가해보기로 결정했다.
+
+<2번 근거>
+AI의 도움을 통해, fine-tuning에 사용되는 데이터를 한 행에 담기엔 현재 context_length(128) 작다는 의견을 받았다. BOS, EOS 같은 특수 문자까지를 포함한 문맥 벡터가 만들어지지 않아, 맥락을 제대로 파악하지 못하는게 아닌가 싶었다. 따라서 context_length를 증가시켜보는 시도를 결정했다.
+
+<3번 근거>
+의미가 반전되는걸 파악하지 못했다면, 문맥에서 특정 단어들에 의존하고 있는게 아닌가 하는 생각이 들었다. attention 쪽에서 head 수를 늘려보는 의견을 받았다. 더 다양한 문맥 정보를 취합한다면, 반전 의미를 파악할 수 있지 않을까 생각했고, 시도를 결정했다.
+
+## 8. 개선사항 적용 결과
+### 8.1 Linear-Layer 추가
+![add-linear-layer](figures/sentiment_affine_drop02_train35000_ep10.png)
+
+### 8.2 context_length 증가
+
+### 8.2 attention head 증가
+![add-linear-layer](figures/)
 
 ## 9. 해석
 - 과적합 가능성
@@ -144,4 +195,4 @@ train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선
 - context_length 128에서 약 16~18%의 리뷰가 잘리고 있으므로, context_length 256 실험을 검토한다.
 - truncation 시 EOS token이 사라지지 않도록 `BOS + 앞부분 + EOS` 형태를 보장한다.
 - 사전학습 validation loss가 epoch 20까지 계속 감소했으므로, vocab/context 변경 후 사전학습을 더 길게 진행한다.
-- 현재 분류 head는 마지막 유효 token hidden state만 사용하므로, mean pooling 또는 EOS pooling을 비교한다.
+- 현재 분류 head는 마지막 유효 token hidden state만 사용하므로, mean pooling 또는 EOS pooling을 비교한다. 
