@@ -54,6 +54,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--n-heads", type=int, default=None, help="Override the preset attention head count.")
     parser.add_argument("--train-chars", type=int, default=None)
     parser.add_argument("--val-chars", type=int, default=None)
     parser.add_argument("--lr", type=float, default=3e-4)
@@ -71,6 +72,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/pretrain"))
     parser.add_argument("--checkpoint-every", type=int, default=5, help="Save a checkpoint every N epochs. 0 disables periodic checkpoints.")
+    parser.add_argument("--early-stopping-patience", type=int, default=0, help="Stop after N epochs without validation loss improvement. 0 disables early stopping.")
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0, help="Minimum validation loss improvement required to reset patience.")
     parser.add_argument("--resume", type=str, default=None, help="Checkpoint path to resume from, or 'auto'.")
     parser.add_argument("--run-name", type=str, default=None)
     parser.add_argument("--metrics-path", type=Path, default=Path("logs/pretrain_basic_metrics.jsonl"))
@@ -312,6 +315,13 @@ def run() -> None:
         torch.cuda.manual_seed_all(args.seed)
 
     config = dict(RUN_CONFIGS[args.run_level])
+    if args.n_heads is not None:
+        config["n_heads"] = args.n_heads
+    if config["emb_dim"] % config["n_heads"] != 0:
+        raise ValueError(
+            f"emb_dim must be divisible by n_heads: emb_dim={config['emb_dim']}, n_heads={config['n_heads']}"
+        )
+
     epochs = args.epochs if args.epochs is not None else config["epochs"]
     batch_size = args.batch_size if args.batch_size is not None else config["batch_size"]
     train_chars = args.train_chars if args.train_chars is not None else config["train_chars"]
@@ -320,6 +330,8 @@ def run() -> None:
     progress_every = max(1, args.progress_every)
     progress_width = max(10, args.progress_width)
     checkpoint_every = max(0, args.checkpoint_every)
+    early_stopping_patience = max(0, args.early_stopping_patience)
+    early_stopping_enabled = early_stopping_patience > 0
 
     tokenizer, resolved_tokenizer_path = load_tokenizer(repo_root, args.tokenizer_path, config["vocab_size"])
     train_text_path = resolve_path(repo_root, args.train_text_path)
@@ -398,6 +410,12 @@ def run() -> None:
         "weight_decay": args.weight_decay,
         "eval_freq": args.eval_freq,
         "eval_iter": args.eval_iter,
+        "early_stopping": {
+            "enabled": early_stopping_enabled,
+            "patience": early_stopping_patience,
+            "min_delta": args.early_stopping_min_delta,
+            "metric": "val_loss",
+        },
         "seed": args.seed,
         "tokenizer_path": str(resolved_tokenizer_path),
         "resume": str(resumed_checkpoint) if resumed_checkpoint else None,
@@ -408,10 +426,16 @@ def run() -> None:
     print(f"run config: {run_config_path}")
 
     best_val_loss = float("inf")
+    best_early_stopping_val_loss: float | None = None
+    epochs_without_improvement = 0
+    epochs_completed = start_epoch - 1
+    early_stopped = False
+    early_stopping_reason: str | None = None
     best_checkpoint_path = run_dir / "best.pt"
     final_checkpoint_path = run_dir / "final.pt"
 
     for epoch in range(start_epoch, epochs + 1):
+        epochs_completed = epoch
         model.train()
         total_loss = 0.0
         batch_count = 0
@@ -486,6 +510,13 @@ def run() -> None:
         history.append(epoch_row)
         append_jsonl_record(metrics_path, epoch_row)
 
+        early_stopping_improved = False
+        if epoch_val_loss is not None:
+            early_stopping_improved = (
+                best_early_stopping_val_loss is None
+                or epoch_val_loss < best_early_stopping_val_loss - args.early_stopping_min_delta
+            )
+
         if epoch_val_loss is not None and epoch_val_loss < best_val_loss:
             best_val_loss = epoch_val_loss
             save_pretrain_checkpoint(
@@ -498,6 +529,17 @@ def run() -> None:
                 config=gpt_config,
             )
             print(f"best checkpoint saved: {best_checkpoint_path}")
+
+        if early_stopping_enabled and epoch_val_loss is not None:
+            if early_stopping_improved:
+                best_early_stopping_val_loss = epoch_val_loss
+                epochs_without_improvement = 0
+            else:
+                epochs_without_improvement += 1
+                print(
+                    f"early stopping patience: {epochs_without_improvement}/{early_stopping_patience} "
+                    f"(val_loss best={best_early_stopping_val_loss:.4f}, current={epoch_val_loss:.4f})"
+                )
 
         sample_text = ""
         if args.sample_context:
@@ -535,6 +577,15 @@ def run() -> None:
             )
             print(f"epoch checkpoint saved: {checkpoint_path}")
 
+        if early_stopping_enabled and epoch_val_loss is not None and epochs_without_improvement >= early_stopping_patience:
+            early_stopped = True
+            early_stopping_reason = (
+                f"val_loss did not improve by at least "
+                f"{args.early_stopping_min_delta:g} for {early_stopping_patience} epoch(s)"
+            )
+            print(f"early stopping triggered at epoch {epoch}: {early_stopping_reason}")
+            break
+
     final_sample = generate_sample(
         model,
         tokenizer,
@@ -557,8 +608,17 @@ def run() -> None:
         "train_tokens": len(train_token_ids),
         "val_tokens": len(val_token_ids),
         "epochs": epochs,
+        "epochs_completed": epochs_completed,
         "global_step": global_step,
         "best_val_loss": best_val_loss if best_val_loss != float("inf") else None,
+        "early_stopping": {
+            "enabled": early_stopping_enabled,
+            "patience": early_stopping_patience,
+            "min_delta": args.early_stopping_min_delta,
+            "metric": "val_loss",
+            "stopped": early_stopped,
+            "reason": early_stopping_reason,
+        },
         "best_checkpoint_path": str(best_checkpoint_path),
         "final_checkpoint_path": str(final_checkpoint_path),
         "generated_text": final_sample,
@@ -571,7 +631,7 @@ def run() -> None:
         final_checkpoint_path,
         model,
         optimizer,
-        epoch=epochs,
+        epoch=epochs_completed,
         global_step=global_step,
         history=history,
         config=gpt_config,

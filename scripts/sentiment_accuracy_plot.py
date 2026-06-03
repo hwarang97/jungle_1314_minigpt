@@ -57,11 +57,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
+    parser.add_argument("--n-heads", type=int, default=None, help="Override the preset attention head count.")
     parser.add_argument("--train-limit", type=int, default=None)
     parser.add_argument("--val-limit", type=int, default=None)
     parser.add_argument("--test-limit", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--backbone-dropout", type=float, default=0.1, help="Dropout used inside the GPT backbone during fine-tuning.")
+    parser.add_argument("--classifier-dropout", type=float, default=0.1, help="Dropout before the sentiment classifier head.")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metrics-path", type=Path, default=Path("logs/sentiment_accuracy_metrics.jsonl"))
@@ -187,7 +190,7 @@ def make_gpt_config(config: dict[str, Any], vocab_size: int) -> dict[str, Any]:
         "emb_dim": config["emb_dim"],
         "n_heads": config["n_heads"],
         "n_layers": config["n_layers"],
-        "drop_rate": 0.1,
+        "drop_rate": config.get("drop_rate", 0.1),
         "qkv_bias": False,
     }
 
@@ -218,14 +221,19 @@ def make_run_dir(
     batch_size: int,
     epochs: int,
     lr: float,
+    backbone_dropout: float,
+    classifier_dropout: float,
     seed: int,
 ) -> Path:
     root = resolve_output_path(repo_root, checkpoint_dir)
     if run_name is None:
+        backbone_dropout_label = f"_gptdrop{backbone_dropout:g}" if backbone_dropout != 0.1 else ""
+        classifier_dropout_label = f"_clsdrop{classifier_dropout:g}" if classifier_dropout != 0.1 else ""
         settings = (
             f"{run_level}_ctx{config['context_length']}_emb{config['emb_dim']}"
             f"_L{config['n_layers']}_H{config['n_heads']}_bs{batch_size}"
-            f"_lr{lr:g}_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
+            f"_lr{lr:g}{backbone_dropout_label}{classifier_dropout_label}"
+            f"_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
         )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{settings}_{timestamp}"
@@ -258,6 +266,8 @@ def write_run_config(
         "epochs": epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
+        "backbone_dropout": args.backbone_dropout,
+        "classifier_dropout": args.classifier_dropout,
         "seed": args.seed,
         "checkpoint_every": args.checkpoint_every,
         "early_stopping": {
@@ -499,6 +509,14 @@ def run() -> None:
         torch.cuda.manual_seed_all(args.seed)
 
     config = dict(RUN_CONFIGS[args.run_level])
+    if args.n_heads is not None:
+        config["n_heads"] = args.n_heads
+    config["drop_rate"] = args.backbone_dropout
+    if config["emb_dim"] % config["n_heads"] != 0:
+        raise ValueError(
+            f"emb_dim must be divisible by n_heads: emb_dim={config['emb_dim']}, n_heads={config['n_heads']}"
+        )
+
     tokenizer, tokenizer_path, actual_vocab_size = load_tokenizer(
         repo_root,
         requested_vocab_size=config["vocab_size"],
@@ -526,7 +544,7 @@ def run() -> None:
     gpt_config = make_gpt_config(config, actual_vocab_size)
     backbone = GPTModel(gpt_config)
     loaded_checkpoint = load_backbone_checkpoint(backbone, args.checkpoint, repo_root, device)
-    clf_model = GPTForSequenceClassification(backbone, num_labels=2).to(device)
+    clf_model = GPTForSequenceClassification(backbone, num_labels=2, drop_rate=args.classifier_dropout).to(device)
     run_dir = make_run_dir(
         repo_root,
         args.checkpoint_dir,
@@ -538,6 +556,8 @@ def run() -> None:
         batch_size,
         epochs,
         args.lr,
+        args.backbone_dropout,
+        args.classifier_dropout,
         args.seed,
     )
     run_config_path = write_run_config(
@@ -785,6 +805,8 @@ def run() -> None:
         "config": gpt_config,
         "limits": limits,
         "batch_size": batch_size,
+        "backbone_dropout": args.backbone_dropout,
+        "classifier_dropout": args.classifier_dropout,
         "epochs": epochs,
         "epochs_completed": epochs_completed,
         "early_stopping": {
