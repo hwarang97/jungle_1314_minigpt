@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
 """GPT 사전 학습 유틸리티 과제 템플릿."""
 
-import matplotlib.pyplot as plt
+import csv
+import json
+import math
+from pathlib import Path
+
 import torch
 
 try:
@@ -50,12 +54,75 @@ def calc_loss_loader(
     return total_loss / batches_seen
 
 
+def calc_metrics_loader(
+    data_loader,
+    model: GPTModel,
+    device: torch.device,
+    num_batches: int | None = None,
+) -> dict[str, float]:
+    """data_loader의 평균 loss, token accuracy, perplexity를 계산합니다."""
+    if data_loader is None or len(data_loader) == 0:
+        return {
+            "loss": float("nan"),
+            "accuracy": float("nan"),
+            "perplexity": float("nan"),
+        }
+
+    total_loss = 0.0
+    total_correct = 0
+    total_tokens = 0
+    batches_seen = 0
+    max_batches = len(data_loader) if num_batches is None else min(num_batches, len(data_loader))
+
+    model.eval()
+    with torch.no_grad():
+        for input_batch, target_batch in data_loader:
+            if batches_seen >= max_batches:
+                break
+
+            input_batch = input_batch.to(device)
+            target_batch = target_batch.to(device)
+            loss, logits = model(input_batch, targets=target_batch)
+
+            total_loss += loss.item()
+            total_correct += (logits.argmax(dim=-1) == target_batch).sum().item()
+            total_tokens += target_batch.numel()
+            batches_seen += 1
+
+    model.train()
+    avg_loss = total_loss / max(1, batches_seen)
+    return {
+        "loss": avg_loss,
+        "accuracy": total_correct / max(1, total_tokens),
+        "perplexity": math.exp(avg_loss) if avg_loss < 100 else float("inf"),
+    }
+
+
+def save_metrics_history(history: list[dict], path: str | Path) -> None:
+    """실험 history를 그래프용 JSONL 또는 CSV 파일로 저장합니다."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.suffix.lower() == ".csv":
+        fieldnames = sorted({key for row in history for key in row.keys()})
+        with output_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(history)
+        return
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for row in history:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
 def save_checkpoint(
     model: GPTModel,
     optimizer: torch.optim.Optimizer,
     epoch: int,
     global_step: int,
     path: str,
+    metrics_history: list[dict] | None = None,
 ) -> None:
     """TODO: model/optimizer 상태, epoch, global_step을 torch.save로 저장합니다."""
     checkpoint = {
@@ -63,6 +130,7 @@ def save_checkpoint(
         "optimizer_state_dict": optimizer.state_dict(),
         "epoch": epoch,
         "global_step": global_step,
+        "metrics_history": metrics_history or [],
     }
     torch.save(checkpoint, path)
 
@@ -159,12 +227,18 @@ def train_model(
     eval_iter: int,
     start_context: str,
     tokenizer,
+    test_loader=None,
     ckpt_freq: int | None = None,
+    metrics_path: str | Path | None = None,
+    return_history: bool = False,
     start_epoch: int = 0,
     global_step: int = 0,
-) -> list[float]:
+) -> list[float] | dict[str, list]:
     """TODO: 사전 학습 루프를 구현하고 epoch별 train loss 리스트를 반환합니다."""
     train_losses = []
+    val_losses = []
+    test_losses = []
+    history = []
 
     model.to(device)
     for epoch in range(start_epoch, start_epoch + num_epochs):
@@ -183,12 +257,76 @@ def train_model(
             global_step += 1
 
             if eval_freq and global_step % eval_freq == 0 and val_loader is not None:
-                calc_loss_loader(val_loader, model, device, num_batches=eval_iter)
+                train_loss = total_loss / max(1, batches_seen)
+                val_metrics = calc_metrics_loader(val_loader, model, device, num_batches=eval_iter)
+                row = {
+                    "phase": "eval",
+                    "epoch": epoch,
+                    "global_step": global_step,
+                    "train_loss": train_loss,
+                    "val_loss": val_metrics["loss"],
+                    "val_accuracy": val_metrics["accuracy"],
+                    "val_perplexity": val_metrics["perplexity"],
+                }
+                history.append(row)
+                val_losses.append(val_metrics["loss"])
+                print(
+                    f"step {global_step}: "
+                    f"train_loss={train_loss:.4f}, "
+                    f"val_loss={val_metrics['loss']:.4f}, "
+                    f"val_acc={val_metrics['accuracy']:.4f}, "
+                    f"val_ppl={val_metrics['perplexity']:.2f}"
+                )
+                if metrics_path is not None:
+                    save_metrics_history(history, metrics_path)
 
             if ckpt_freq and global_step % ckpt_freq == 0:
-                save_checkpoint(model, optimizer, epoch, global_step, f"checkpoint_step_{global_step}.pt")
+                save_checkpoint(
+                    model,
+                    optimizer,
+                    epoch,
+                    global_step,
+                    f"checkpoint_step_{global_step}.pt",
+                    metrics_history=history,
+                )
 
-        train_losses.append(total_loss / max(1, batches_seen))
+        epoch_train_loss = total_loss / max(1, batches_seen)
+        train_losses.append(epoch_train_loss)
+        row = {
+            "phase": "epoch",
+            "epoch": epoch,
+            "global_step": global_step,
+            "train_loss": epoch_train_loss,
+        }
+
+        if val_loader is not None:
+            val_metrics = calc_metrics_loader(val_loader, model, device, num_batches=eval_iter)
+            row.update({
+                "val_loss": val_metrics["loss"],
+                "val_accuracy": val_metrics["accuracy"],
+                "val_perplexity": val_metrics["perplexity"],
+            })
+            val_losses.append(val_metrics["loss"])
+
+        if test_loader is not None:
+            test_metrics = calc_metrics_loader(test_loader, model, device, num_batches=eval_iter)
+            row.update({
+                "test_loss": test_metrics["loss"],
+                "test_accuracy": test_metrics["accuracy"],
+                "test_perplexity": test_metrics["perplexity"],
+            })
+            test_losses.append(test_metrics["loss"])
+
+        history.append(row)
+        print(
+            f"epoch {epoch}: "
+            f"train_loss={epoch_train_loss:.4f}"
+            + (f", val_loss={row['val_loss']:.4f}" if "val_loss" in row else "")
+            + (f", test_loss={row['test_loss']:.4f}" if "test_loss" in row else "")
+        )
+
+        if metrics_path is not None:
+            save_metrics_history(history, metrics_path)
 
         if tokenizer is not None and start_context:
             generate_and_print_sample(
@@ -199,11 +337,21 @@ def train_model(
                 context_size=model.config.get("context_length", 256),
             )
 
+    if return_history:
+        return {
+            "train_losses": train_losses,
+            "val_losses": val_losses,
+            "test_losses": test_losses,
+            "history": history,
+        }
+
     return train_losses
 
 
 def plot_losses(train_losses: list[float], val_losses: list[float] | None = None) -> None:
     """훈련/검증 손실 그래프를 그리는 제공 함수."""
+    import matplotlib.pyplot as plt
+
     plt.plot(train_losses, label="Train")
     if val_losses is not None:
         plt.plot(val_losses, label="Val")

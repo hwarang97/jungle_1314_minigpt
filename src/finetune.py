@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """NSMC 감성 분류 미세 조정 과제 템플릿."""
 
+import csv
 from pathlib import Path
 import json
 import random
@@ -191,3 +192,76 @@ def evaluate_sentiment(
             total_count += input_ids.size(0)
 
     return total_loss / max(1, total_count), total_correct / max(1, total_count)
+
+
+def save_sentiment_history(history: list[dict], path: str | Path) -> None:
+    """감성 분류 실험 history를 그래프용 JSONL 또는 CSV 파일로 저장합니다."""
+    output_path = Path(path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.suffix.lower() == ".csv":
+        fieldnames = sorted({key for row in history for key in row.keys()})
+        with output_path.open("w", newline="", encoding="utf-8") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(history)
+        return
+
+    with output_path.open("w", encoding="utf-8") as f:
+        for row in history:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def train_sentiment_model(
+    model: GPTForSequenceClassification,
+    train_loader,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    num_epochs: int,
+    val_loader=None,
+    test_loader=None,
+    metrics_path: str | Path | None = None,
+) -> list[dict]:
+    """감성 분류 모델을 학습하고 epoch별 loss/accuracy history를 반환합니다."""
+    history = []
+    model.to(device)
+
+    for epoch in range(num_epochs):
+        train_loss, train_accuracy = train_epoch_sentiment(
+            model,
+            train_loader,
+            optimizer,
+            device,
+        )
+        row = {
+            "epoch": epoch,
+            "train_loss": train_loss,
+            "train_accuracy": train_accuracy,
+        }
+
+        if val_loader is not None:
+            val_loss, val_accuracy = evaluate_sentiment(model, val_loader, device)
+            row.update({
+                "val_loss": val_loss,
+                "val_accuracy": val_accuracy,
+            })
+
+        if test_loader is not None:
+            test_loss, test_accuracy = evaluate_sentiment(model, test_loader, device)
+            row.update({
+                "test_loss": test_loss,
+                "test_accuracy": test_accuracy,
+            })
+
+        history.append(row)
+        print(
+            f"epoch {epoch}: "
+            f"train_loss={train_loss:.4f}, train_acc={train_accuracy:.4f}"
+            + (f", val_loss={row['val_loss']:.4f}, val_acc={row['val_accuracy']:.4f}" if "val_loss" in row else "")
+            + (f", test_loss={row['test_loss']:.4f}, test_acc={row['test_accuracy']:.4f}" if "test_loss" in row else "")
+        )
+
+        if metrics_path is not None:
+            save_sentiment_history(history, metrics_path)
+
+    return history
