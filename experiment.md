@@ -96,6 +96,9 @@
 그래프의 경향을 보면 train loss와 validation loss가 함께 감소하고 있어, 뚜렷한 과적합 없이 이상적으로 학습이 진행되고 있다고 판단했다.
 따라서 이 단계에서는 사전학습 성능을 더 끌어올리기보다, 사전학습된 checkpoint를 사용해 미세튜닝으로 넘어가서 sentiment classification 성능을 개선하는 것이 더 적절하다고 판단했다.
 
+### 5.5 사전학습 결과
+![LLM](figures/LLM.png)
+
 ## 6. 실험 기록
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -104,6 +107,7 @@
 | mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
 
 ## 7. Fine-tuning 결과
+![sentimental](figures/sentimental%20predict%20result.png)
 
 ### 7.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
@@ -115,6 +119,12 @@
 
 #### 7.2.2 lr=5e-5
 ![lr5e-5 result](figures/sentiment_pretrained_train35000_ep20_lr5e-5.png)
+
+#### 7.2.2 dropout=0.2 
+![dropout0.2 result](figures/dropout0.2%20result.png)
+
+#### 7.2.3 dropout=0.3
+![dropout0.3 result]
 
 ## 8. 분석
 실성능은 80% 내외에서 머무르고 있다.
