@@ -233,6 +233,7 @@ def train_model(
     ckpt_freq: int | None = None,
     start_epoch: int = 0,
     global_step: int = 0,
+    ckpt_dir: str | Path = "checkpoints",
     metrics_path: str | Path | None = "logs/pretrain_metrics.jsonl",
     sample_path: str | Path | None = "logs/pretrain_samples.jsonl",
 ) -> list[float]:
@@ -245,11 +246,13 @@ def train_model(
     3. batch마다 zero_grad -> loss -> backward -> step을 수행합니다.
     4. eval_freq마다 train/val loss를 출력합니다.
     5. ckpt_freq마다 checkpoint를 저장합니다.
-    6. epoch 평균 train loss를 기록합니다.
-    7. start_context가 있으면 샘플 생성을 출력합니다.
-    8. metrics_path/sample_path가 있으면 loss와 생성 샘플을 JSONL로 저장합니다.
+    6. 마지막에도 final checkpoint를 저장합니다.
+    7. epoch 평균 train loss를 기록합니다.
+    8. start_context가 있으면 샘플 생성을 출력합니다.
+    9. metrics_path/sample_path가 있으면 loss와 생성 샘플을 JSONL로 저장합니다.
     """
     model.to(device)
+    ckpt_dir = Path(ckpt_dir)
     train_losses = []
 
     for epoch in range(start_epoch, start_epoch + num_epochs):
@@ -295,7 +298,15 @@ def train_model(
 
             if ckpt_freq and global_step % ckpt_freq == 0:
                 # 긴 Colab 학습이 끊겨도 이어갈 수 있도록 주기적으로 checkpoint를 저장합니다.
-                save_checkpoint(model, optimizer, epoch=epoch, global_step=global_step, path=f"checkpoints/ckpt_step_{global_step}.pt")
+                ckpt_path = ckpt_dir / f"ckpt_step_{global_step}.pt"
+                save_checkpoint(
+                    model,
+                    optimizer,
+                    epoch=epoch,
+                    global_step=global_step,
+                    path=str(ckpt_path),
+                )
+                print(f"saved checkpoint: {ckpt_path}")
 
         epoch_train_loss = total_loss / batch_count if batch_count else float("nan")
         train_losses.append(epoch_train_loss)
@@ -329,6 +340,17 @@ def train_model(
                     "generated_text": generated_text,
                 },
             )
+
+    final_epoch = start_epoch + num_epochs - 1 if num_epochs > 0 else start_epoch
+    final_ckpt_path = ckpt_dir / "pretrain_final_checkpoint.pt"
+    save_checkpoint(
+        model,
+        optimizer,
+        epoch=final_epoch,
+        global_step=global_step,
+        path=str(final_ckpt_path),
+    )
+    print(f"saved final checkpoint: {final_ckpt_path}")
 
     return train_losses
 
