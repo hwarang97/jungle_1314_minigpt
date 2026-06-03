@@ -101,25 +101,40 @@
 
 
 ## 6. Fine-tuning
-| 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
-|---|---:|---:|---:|---:|---:|---:|---:|
-| baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
-| low lr | 1e-5 | 10 | 10 | 8 | 0.4818 | 0.7680 | 0.7896 |
-| mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
 
 ### 6.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
 
+| 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
+
 ### 7 개선사항 적용 결과
 
 #### 7.1.1 lr=1e-5
-![lr1e-5 result](figures/sentiment_pretrained_train35000_ep10_lr1e-5.png)
+![lr1e-5 result](figures/sentiment_lr1e-5.png)
+
+| 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
+| low lr | 1e-5 | 10 | 10 | 8 | 0.4818 | 0.7680 | 0.7896 |
 
 #### 7.1.2 lr=5e-5
-![lr5e-5 result](figures/sentiment_pretrained_train35000_ep20_lr5e-5.png)
+![lr5e-5 result](figures/sentiment_lr5e-5.png)
+
+| 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
+| mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
 
 #### 7.1.3 dropout=0.2 
-![dropout0.2 result](figures/dropout0.2%20result.png)
+![dropout0.2 result](figures/sentiment_dout0.2.png)
+
+| 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032
+| dout0.2 | 1e-4 | 10 | 6 |	4 |	0.4763 | 0.7775 | 0.7896
+
 
 #### 7.2 Fine-tuning 결과
 ![sentimental](figures/sentimental%20predict%20result.png) 
