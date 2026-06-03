@@ -99,7 +99,6 @@
 ### 5.5 사전학습 결과
 ![LLM](figures/LLM.png)
 
-
 ## 6. Fine-tuning
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -109,6 +108,10 @@
 
 ### 6.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
+
+### 6.2 결과 분석
+train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선되지 않아, train 데이터에 대한 과적합이 발생하고 있는 것으로 보인다. 실성능은 80% 내외에서 머무르고 있다.
+과적합이 발생하고 있다 판단했고, lr과 dropout을 조정해 결과가 개선되는지 재확인해보기로 했다.
 
 ### 7 개선사항 적용 결과
 
@@ -124,24 +127,19 @@
 #### 7.2 Fine-tuning 결과
 ![sentimental](figures/sentimental%20predict%20result.png) 
 
-## 8. 분석
-실성능은 80% 내외에서 머무르고 있다.
-train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선되지 않아, train 데이터에 대한 과적합이 발생하고 있는 것으로 보인다.
-따라서 lr과 dropout을 조정해 결과가 개선되는지 재확인해보기로 했다.
-
-## 9. 관찰
+## 8. 관찰
 - train loss는 감소했는가?
 - validation loss는 언제부터 증가했는가?
 - validation accuracy는 개선되었는가?
 - early stopping이 어느 epoch에서 걸렸는가?
 
-## 10. 해석
+## 9. 해석
 - 과적합 가능성
 - lr 영향
 - 데이터 크기 영향
 - 사전학습 checkpoint 효과
 
-## 11. 개선 방향
+## 10. 개선 방향
 - vocab_size를 3,000에서 6,000 / 8,000 / 12,000으로 늘려 평균 token 길이와 truncation 비율을 비교한다.
 - context_length 128에서 약 16~18%의 리뷰가 잘리고 있으므로, context_length 256 실험을 검토한다.
 - truncation 시 EOS token이 사라지지 않도록 `BOS + 앞부분 + EOS` 형태를 보장한다.
