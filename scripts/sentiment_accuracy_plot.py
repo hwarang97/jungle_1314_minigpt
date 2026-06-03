@@ -62,6 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--test-limit", type=int, default=None)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--weight-decay", type=float, default=0.1)
+    parser.add_argument("--classifier-dropout", type=float, default=0.1)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metrics-path", type=Path, default=Path("logs/sentiment_accuracy_metrics.jsonl"))
@@ -218,6 +219,7 @@ def make_run_dir(
     batch_size: int,
     epochs: int,
     lr: float,
+    classifier_dropout: float,
     seed: int,
 ) -> Path:
     root = resolve_output_path(repo_root, checkpoint_dir)
@@ -225,7 +227,8 @@ def make_run_dir(
         settings = (
             f"{run_level}_ctx{config['context_length']}_emb{config['emb_dim']}"
             f"_L{config['n_layers']}_H{config['n_heads']}_bs{batch_size}"
-            f"_lr{lr:g}_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
+            f"_lr{lr:g}_drop{classifier_dropout:g}"
+            f"_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
         )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{settings}_{timestamp}"
@@ -258,6 +261,7 @@ def write_run_config(
         "epochs": epochs,
         "lr": args.lr,
         "weight_decay": args.weight_decay,
+        "classifier_dropout": args.classifier_dropout,
         "seed": args.seed,
         "checkpoint_every": args.checkpoint_every,
         "early_stopping": {
@@ -526,7 +530,11 @@ def run() -> None:
     gpt_config = make_gpt_config(config, actual_vocab_size)
     backbone = GPTModel(gpt_config)
     loaded_checkpoint = load_backbone_checkpoint(backbone, args.checkpoint, repo_root, device)
-    clf_model = GPTForSequenceClassification(backbone, num_labels=2).to(device)
+    clf_model = GPTForSequenceClassification(
+        backbone,
+        num_labels=2,
+        drop_rate=args.classifier_dropout,
+    ).to(device)
     run_dir = make_run_dir(
         repo_root,
         args.checkpoint_dir,
@@ -538,6 +546,7 @@ def run() -> None:
         batch_size,
         epochs,
         args.lr,
+        args.classifier_dropout,
         args.seed,
     )
     run_config_path = write_run_config(
@@ -785,6 +794,7 @@ def run() -> None:
         "config": gpt_config,
         "limits": limits,
         "batch_size": batch_size,
+        "classifier_dropout": args.classifier_dropout,
         "epochs": epochs,
         "epochs_completed": epochs_completed,
         "early_stopping": {
