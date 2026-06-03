@@ -58,7 +58,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--val-chars", type=int, default=None)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=0.01)
-    parser.add_argument("--eval-freq", type=int, default=100)
+    parser.add_argument("--eval-freq", type=int, default=0, help="Optional step-based eval frequency. 0 keeps epoch-only eval.")
     parser.add_argument("--eval-iter", type=int, default=20)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
@@ -255,27 +255,18 @@ def plot_history(history: list[dict[str, Any]], plot_path: Path) -> None:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    eval_rows = [row for row in history if row.get("event") == "eval"]
     epoch_rows = [row for row in history if row.get("event") == "epoch"]
     plot_path.parent.mkdir(parents=True, exist_ok=True)
 
     plt.figure(figsize=(9, 5))
-    if eval_rows:
-        steps = [row["global_step"] for row in eval_rows]
-        train_losses = [row["train_loss"] for row in eval_rows]
-        plt.plot(steps, train_losses, marker="o", label="train eval loss")
-        val_rows = [row for row in eval_rows if row.get("val_loss") is not None]
+    if epoch_rows:
+        epochs = [row["epoch"] for row in epoch_rows]
+        plt.plot(epochs, [row["train_loss"] for row in epoch_rows], marker="o", label="train loss")
+        val_rows = [row for row in epoch_rows if row.get("val_loss") is not None]
         if val_rows:
-            plt.plot(
-                [row["global_step"] for row in val_rows],
-                [row["val_loss"] for row in val_rows],
-                marker="o",
-                label="validation loss",
-            )
-    elif epoch_rows:
-        plt.plot([row["epoch"] for row in epoch_rows], [row["train_loss"] for row in epoch_rows], marker="o", label="train epoch loss")
+            plt.plot([row["epoch"] for row in val_rows], [row["val_loss"] for row in val_rows], marker="o", label="validation loss")
 
-    plt.xlabel("global step" if eval_rows else "epoch")
+    plt.xlabel("epoch")
     plt.ylabel("loss")
     plt.title("Mini GPT pretraining loss")
     plt.legend()
@@ -470,23 +461,16 @@ def run() -> None:
                     end=True,
                     last_len=line_len,
                 )
-                if val_eval is not None and val_eval < best_val_loss:
-                    best_val_loss = val_eval
-                    save_pretrain_checkpoint(
-                        best_checkpoint_path,
-                        model,
-                        optimizer,
-                        epoch=epoch,
-                        global_step=global_step,
-                        history=history,
-                        config=gpt_config,
-                    )
-                    print(f"best checkpoint saved: {best_checkpoint_path}")
-
         epoch_loss = total_loss / batch_count if batch_count else float("nan")
+        epoch_val_loss = calc_loss_loader(val_loader, model, device, num_batches=args.eval_iter) if val_loader is not None else None
         print_progress(
             progress,
-            f"epoch {epoch:03d}/{epochs:03d} train done loss={epoch_loss:.4f}",
+            (
+                f"epoch {epoch:03d}/{epochs:03d} done "
+                f"train loss={epoch_loss:.4f}, val loss={epoch_val_loss:.4f}"
+                if epoch_val_loss is not None
+                else f"epoch {epoch:03d}/{epochs:03d} done train loss={epoch_loss:.4f}"
+            ),
             end=True,
             last_len=line_len,
         )
@@ -496,9 +480,24 @@ def run() -> None:
             "epoch": epoch,
             "global_step": global_step,
             "train_loss": epoch_loss,
+            "val_loss": epoch_val_loss,
+            "eval_iter": args.eval_iter,
         }
         history.append(epoch_row)
         append_jsonl_record(metrics_path, epoch_row)
+
+        if epoch_val_loss is not None and epoch_val_loss < best_val_loss:
+            best_val_loss = epoch_val_loss
+            save_pretrain_checkpoint(
+                best_checkpoint_path,
+                model,
+                optimizer,
+                epoch=epoch,
+                global_step=global_step,
+                history=history,
+                config=gpt_config,
+            )
+            print(f"best checkpoint saved: {best_checkpoint_path}")
 
         sample_text = ""
         if args.sample_context:

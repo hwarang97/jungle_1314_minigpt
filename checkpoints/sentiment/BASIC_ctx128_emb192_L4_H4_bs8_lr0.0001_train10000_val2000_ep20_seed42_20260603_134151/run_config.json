@@ -1,0 +1,28 @@
+{
+  "run_level": "BASIC",
+  "device": "auto",
+  "require_cuda": true,
+  "tokenizer_path": "C:\\home\\dolggul2\\crafton\\week13-14\\SW-AI-W1314-MINIGPT\\data\\tokenizer.json",
+  "loaded_checkpoint": null,
+  "gpt_config": {
+    "vocab_size": 3000,
+    "context_length": 128,
+    "emb_dim": 192,
+    "n_heads": 4,
+    "n_layers": 4,
+    "drop_rate": 0.1,
+    "qkv_bias": false
+  },
+  "limits": {
+    "train": 10000,
+    "val": 2000,
+    "test": 2000
+  },
+  "batch_size": 8,
+  "epochs": 20,
+  "lr": 0.0001,
+  "weight_decay": 0.1,
+  "seed": 42,
+  "checkpoint_every": 5,
+  "created_at": "2026-06-03T13:41:51"
+}
