@@ -106,44 +106,42 @@
 | baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
 | low lr | 1e-5 | 10 | 10 | 8 | 0.4818 | 0.7680 | 0.7896 |
 | mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
+
 ### 6.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
 
-### 6.2 개선사항 적용 결과
+### 7 개선사항 적용 결과
 
-#### 6.2.1 lr=1e-5
+#### 7.1.1 lr=1e-5
 ![lr1e-5 result](figures/sentiment_pretrained_train35000_ep10_lr1e-5.png)
 
-#### 6.2.2 lr=5e-5
+#### 7.1.2 lr=5e-5
 ![lr5e-5 result](figures/sentiment_pretrained_train35000_ep20_lr5e-5.png)
 
-#### 6.2.2 dropout=0.2 
+#### 7.1.3 dropout=0.2 
 ![dropout0.2 result](figures/dropout0.2%20result.png)
 
-#### 6.2.3 dropout=0.3
-![dropout0.3 result]
-
-#### 6.3 Fine-tuning 결과
+#### 7.2 Fine-tuning 결과
 ![sentimental](figures/sentimental%20predict%20result.png) 
 
-## 7. 분석
+## 8. 분석
 실성능은 80% 내외에서 머무르고 있다.
 train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선되지 않아, train 데이터에 대한 과적합이 발생하고 있는 것으로 보인다.
 따라서 lr과 dropout을 조정해 결과가 개선되는지 재확인해보기로 했다.
 
-## 8. 관찰
+## 9. 관찰
 - train loss는 감소했는가?
 - validation loss는 언제부터 증가했는가?
 - validation accuracy는 개선되었는가?
 - early stopping이 어느 epoch에서 걸렸는가?
 
-## 9. 해석
+## 10. 해석
 - 과적합 가능성
 - lr 영향
 - 데이터 크기 영향
 - 사전학습 checkpoint 효과
 
-## 10. 개선 방향
+## 11. 개선 방향
 - vocab_size를 3,000에서 6,000 / 8,000 / 12,000으로 늘려 평균 token 길이와 truncation 비율을 비교한다.
 - context_length 128에서 약 16~18%의 리뷰가 잘리고 있으므로, context_length 256 실험을 검토한다.
 - truncation 시 EOS token이 사라지지 않도록 `BOS + 앞부분 + EOS` 형태를 보장한다.
