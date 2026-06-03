@@ -181,18 +181,9 @@ AI의 도움을 통해, fine-tuning에 사용되는 데이터를 한 행에 담�
 
 ### 8.2 context_length 증가
 
-### 8.2 attention head 증가
-![add-linear-layer](figures/)
+### 8.3 attention head 증가
+![add-linear-layer](figures/sentiment_heads8_train35000_ep20.png)
 
-## 9. 해석
-- 과적합 가능성
-- lr 영향
-- 데이터 크기 영향
-- 사전학습 checkpoint 효과
-
-## 10. 개선 방향
-- vocab_size를 3,000에서 6,000 / 8,000 / 12,000으로 늘려 평균 token 길이와 truncation 비율을 비교한다.
-- context_length 128에서 약 16~18%의 리뷰가 잘리고 있으므로, context_length 256 실험을 검토한다.
-- truncation 시 EOS token이 사라지지 않도록 `BOS + 앞부분 + EOS` 형태를 보장한다.
-- 사전학습 validation loss가 epoch 20까지 계속 감소했으므로, vocab/context 변경 후 사전학습을 더 길게 진행한다.
-- 현재 분류 head는 마지막 유효 token hidden state만 사용하므로, mean pooling 또는 EOS pooling을 비교한다. 
+### 8.4 결과 분석
+여러번 시도를 해봤지만, 의미있는 변화를 찾기는 어려웠다. 
+아직 원인을 제대로 찾지 못했고, 가장 쉬운 방법은 사전 훈련을 더 진행해, 모델 기본 성능 자체를 올리는 것이 가장 좋을 것 같다는 판단이 들었다.
