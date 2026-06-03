@@ -73,6 +73,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-progress", action="store_true", help="Disable carriage-return batch progress.")
     parser.add_argument("--checkpoint-dir", type=Path, default=Path("checkpoints/sentiment"))
     parser.add_argument("--checkpoint-every", type=int, default=5, help="Save a checkpoint every N epochs. 0 disables periodic checkpoints.")
+    parser.add_argument("--early-stopping-patience", type=int, default=0, help="Stop after N epochs without validation improvement. 0 disables early stopping.")
+    parser.add_argument("--early-stopping-metric", choices=["val_loss", "val_accuracy"], default="val_loss")
+    parser.add_argument("--early-stopping-min-delta", type=float, default=0.0, help="Minimum validation improvement required to reset patience.")
     parser.add_argument("--run-name", type=str, default=None, help="Optional checkpoint run directory name.")
     return parser.parse_args()
 
@@ -194,6 +197,16 @@ def slugify(text: str) -> str:
     return text.strip("_") or "sentiment_run"
 
 
+def metric_improved(metric: str, value: float, best_value: float | None, min_delta: float) -> bool:
+    if best_value is None:
+        return True
+    if metric == "val_loss":
+        return value < best_value - min_delta
+    if metric == "val_accuracy":
+        return value > best_value + min_delta
+    raise ValueError(f"Unsupported metric: {metric}")
+
+
 def make_run_dir(
     repo_root: Path,
     checkpoint_dir: Path,
@@ -247,6 +260,11 @@ def write_run_config(
         "weight_decay": args.weight_decay,
         "seed": args.seed,
         "checkpoint_every": args.checkpoint_every,
+        "early_stopping": {
+            "patience": args.early_stopping_patience,
+            "metric": args.early_stopping_metric,
+            "min_delta": args.early_stopping_min_delta,
+        },
         "created_at": datetime.now().isoformat(timespec="seconds"),
     }
     config_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -572,8 +590,19 @@ def run() -> None:
 
     optimizer = torch.optim.AdamW(clf_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     history: list[dict[str, float]] = []
+    early_stopping_patience = max(0, args.early_stopping_patience)
+    early_stopping_enabled = early_stopping_patience > 0
+    best_metric = args.early_stopping_metric if early_stopping_enabled else "val_accuracy"
+    best_metric_value: float | None = None
+    best_checkpoint_val_loss: float | None = None
+    best_checkpoint_val_acc: float | None = None
+    best_val_loss = float("inf")
     best_val_acc = -1.0
     best_epoch = 0
+    epochs_completed = 0
+    epochs_without_improvement = 0
+    early_stopped = False
+    early_stopping_reason: str | None = None
     best_checkpoint_path = run_dir / "best.pt"
     final_checkpoint_path = run_dir / "final.pt"
     test_metrics: dict[str, float] | None = None
@@ -634,14 +663,32 @@ def run() -> None:
                 "val_accuracy": val_acc,
             }
         )
+        epochs_completed = epoch
+        best_val_loss = min(best_val_loss, val_loss)
+        best_val_acc = max(best_val_acc, val_acc)
         print(
             f"epoch {epoch}: "
             f"train loss={train_loss:.4f}, train acc={train_acc:.4f}, "
             f"val loss={val_loss:.4f}, val acc={val_acc:.4f}"
         )
-        if val_acc > best_val_acc:
-            best_val_acc = val_acc
+
+        current_metrics = {
+            "val_loss": val_loss,
+            "val_accuracy": val_acc,
+        }
+        current_metric_value = current_metrics[best_metric]
+        improved = metric_improved(
+            best_metric,
+            current_metric_value,
+            best_metric_value,
+            args.early_stopping_min_delta if early_stopping_enabled else 0.0,
+        )
+        if improved:
+            best_metric_value = current_metric_value
             best_epoch = epoch
+            best_checkpoint_val_loss = val_loss
+            best_checkpoint_val_acc = val_acc
+            epochs_without_improvement = 0
             save_sentiment_checkpoint(
                 best_checkpoint_path,
                 clf_model,
@@ -651,7 +698,13 @@ def run() -> None:
                 test_metrics=test_metrics,
                 gpt_config=gpt_config,
             )
-            print(f"best checkpoint saved: {best_checkpoint_path}")
+            print(f"best checkpoint saved: {best_checkpoint_path} ({best_metric}={current_metric_value:.4f})")
+        elif early_stopping_enabled:
+            epochs_without_improvement += 1
+            print(
+                f"early stopping patience: {epochs_without_improvement}/{early_stopping_patience} "
+                f"({best_metric} best={best_metric_value:.4f}, current={current_metric_value:.4f})"
+            )
 
         if checkpoint_every and epoch % checkpoint_every == 0:
             epoch_checkpoint_path = run_dir / f"epoch_{epoch:03d}.pt"
@@ -666,12 +719,21 @@ def run() -> None:
             )
             print(f"epoch checkpoint saved: {epoch_checkpoint_path}")
 
+        if early_stopping_enabled and epochs_without_improvement >= early_stopping_patience:
+            early_stopped = True
+            early_stopping_reason = (
+                f"{best_metric} did not improve by at least "
+                f"{args.early_stopping_min_delta:g} for {early_stopping_patience} epoch(s)"
+            )
+            print(f"early stopping triggered at epoch {epoch}: {early_stopping_reason}")
+            break
+
     test_loss, test_acc = evaluate_with_progress(
         clf_model,
         test_loader,
         device,
         split="test",
-        epoch=epochs,
+        epoch=epochs_completed,
         total_epochs=epochs,
         progress=progress,
         progress_every=progress_every,
@@ -684,7 +746,7 @@ def run() -> None:
             "stage": "sentiment",
             "event": "evaluate",
             "split": "test",
-            "epoch": epochs,
+            "epoch": epochs_completed,
             "loss": test_loss,
             "accuracy": test_acc,
             "num_examples": len(test_data),
@@ -695,7 +757,7 @@ def run() -> None:
         final_checkpoint_path,
         clf_model,
         optimizer,
-        epoch=epochs,
+        epoch=epochs_completed,
         history=history,
         test_metrics=test_metrics,
         gpt_config=gpt_config,
@@ -713,12 +775,26 @@ def run() -> None:
         "run_config_path": str(run_config_path),
         "best_checkpoint_path": str(best_checkpoint_path),
         "best_epoch": best_epoch,
+        "best_checkpoint_metric": best_metric,
+        "best_checkpoint_metric_value": best_metric_value,
+        "best_checkpoint_val_loss": best_checkpoint_val_loss,
+        "best_checkpoint_val_accuracy": best_checkpoint_val_acc,
+        "best_val_loss": best_val_loss,
         "best_val_accuracy": best_val_acc,
         "final_checkpoint_path": str(final_checkpoint_path),
         "config": gpt_config,
         "limits": limits,
         "batch_size": batch_size,
         "epochs": epochs,
+        "epochs_completed": epochs_completed,
+        "early_stopping": {
+            "enabled": early_stopping_enabled,
+            "patience": early_stopping_patience,
+            "metric": args.early_stopping_metric,
+            "min_delta": args.early_stopping_min_delta,
+            "stopped": early_stopped,
+            "reason": early_stopping_reason,
+        },
         "history": history,
         "test": test_metrics,
         "metrics_path": str(metrics_path),
