@@ -30,14 +30,7 @@
 사전학습과 미세튜닝에서는 같은 tokenizer를 사용했다.
 이렇게 해야 사전학습된 checkpoint의 embedding table과 미세튜닝 입력 token id가 같은 의미를 유지할 수 있다.
 
-## 3. 현재 데이터셋
-| split | 사용 개수 | 전체 개수 | 비율 |
-|---|---:|---:|---:|
-| train | 35,000 | 137,996 | 약 25.4% |
-| validation | 6,000 | 11,999 | 약 50.0% |
-| test | 5,000 | 49,997 | 약 10.0% |
-
-## 4. 공통 설정
+## 3. 공통 설정
 - run_level: BASIC
 - emb_dim: 192
 - n_layers: 4
@@ -51,9 +44,9 @@
 - seed: 42
 - early stopping: val_loss, patience 2, min_delta 0.001
 
-## 5. 사전학습
+## 4. 사전학습
 
-### 5.1 사전학습 설정
+### 4.1 사전학습 설정
 | 항목 | 값 |
 |---|---:|
 | task | NSMC language modeling |
@@ -74,7 +67,7 @@
 | seed | 42 |
 | device | CUDA |
 
-### 5.2 사전학습 데이터와 결과
+### 4.2 사전학습 데이터와 결과
 | 항목 | 값 |
 |---|---:|
 | requested train chars | 1,500,000 |
@@ -89,32 +82,38 @@
 | best checkpoint | checkpoints/pretrain/BASIC_ctx128_emb192_L4_H4_bs32_lr0.0003_chars1500000_val200000_ep20_seed42_20260603_153345/best.pt |
 | final checkpoint | checkpoints/pretrain/BASIC_ctx128_emb192_L4_H4_bs32_lr0.0003_chars1500000_val200000_ep20_seed42_20260603_153345/final.pt |
 
-### 5.3 사전학습 그래프
+### 4.3 사전학습 그래프
 ![pretrain basic epoch loss](figures/pretrain_basic_epoch_loss.png)
 
-### 5.4 사전학습 결과 분석
+### 4.4 사전학습 결과 분석
 그래프의 경향을 보면 train loss와 validation loss가 함께 감소하고 있어, 뚜렷한 과적합 없이 이상적으로 학습이 진행되고 있다고 판단했다.
 따라서 이 단계에서는 사전학습 성능을 더 끌어올리기보다, 사전학습된 checkpoint를 사용해 미세튜닝으로 넘어가서 sentiment classification 성능을 개선하는 것이 더 적절하다고 판단했다.
 
-### 5.5 사전학습 결과
+### 4.5 사전학습 결과
 ![LLM](figures/LLM.png)
 
-## 6. Fine-tuning
+## 5. Fine-tuning
 
-### 6.1 초기 fine-tuning 결과
+| split | 사용 개수 | 전체 개수 | 비율 |
+|---|---:|---:|---:|
+| train | 35,000 | 137,996 | 약 25.4% |
+| validation | 6,000 | 11,999 | 약 50.0% |
+| test | 5,000 | 49,997 | 약 10.0% |
+
+### 5.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
 
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
 |---|---:|---:|---:|---:|---:|---:|---:|
 | baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
 
-### 6.2 결과 분석
+### 5.2 결과 분석
 train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선되지 않아, train 데이터에 대한 과적합이 발생하고 있는 것으로 보인다. 실성능은 80% 내외에서 머무르고 있다.
 과적합이 발생하고 있다 판단했고, lr과 dropout을 조정해 결과가 개선되는지 재확인해보기로 했다.
 
-### 7 개선사항 적용 결과
+## 6 개선사항 적용 결과
 
-#### 7.1.1 lr=1e-5
+### 6.1.1 lr=1e-5
 ![lr1e-5 result](figures/sentiment_lr1e-5.png)
 
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
@@ -122,7 +121,7 @@ train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선
 | baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
 | low lr | 1e-5 | 10 | 10 | 8 | 0.4818 | 0.7680 | 0.7896 |
 
-#### 7.1.2 lr=5e-5
+### 6.1.2 lr=5e-5
 ![lr5e-5 result](figures/sentiment_lr5e-5.png)
 
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
@@ -130,7 +129,7 @@ train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선
 | baseline | 1e-4 | 10 | 10 | 10 | 0.5353 | 0.7900 | 0.8032 |
 | mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
 
-#### 7.1.3 dropout=0.2 
+### 6.1.3 dropout=0.2 
 ![dropout0.2 result](figures/sentiment_dout0.2.png)
 
 | 실험 | lr | epochs | completed | best epoch | best val loss | best val acc | test acc |
@@ -139,10 +138,10 @@ train accuracy는 계속 상승하지만 validation/test 성능은 크게 개선
 | dout0.2 | 1e-4 | 10 | 6 |	4 |	0.4763 | 0.7775 | 0.7896
 
 
-#### 7.2 Fine-tuning 결과
+### 6.2 Fine-tuning 결과
 ![sentimental](figures/sentimental%20predict%20result.png) 
 
-#### 7.3 결과 분석
+### 6.3 결과 분석
 과적합이 문제라 생각해 lr, drop을 적용해보았지만 개선되는 모습을 확인하지 못했다.
 따라서 어떤 데이터에서 문제가 생기는지를 확인해보았다.
 ![confision-matrix](figures/confusion_matrix_sentiment_affine_lr1e-4_train35000_test.png) 
@@ -176,7 +175,7 @@ confidence: 0.995
 이 결과를 보면 모델은 명확한 긍정/부정 문장은 잘 맞춘다.
 하지만 실제 긍정 리뷰 안에 부정 단어가 섞여 있거나, 문장 후반부에서 의미가 반전되는 경우에는 특정 단어에 크게 의존해 의미를 제대로 파악하지 못한다.
 
-#### 7.4 개선 방향
+### 6.4 개선 방향
 1. 분류에 사용되는 레이어 추가
 2. context_length 증가
 3. num_multihead 증가
@@ -190,16 +189,16 @@ AI의 도움을 통해, fine-tuning에 사용되는 데이터를 한 행에 담�
 <3번 근거>
 의미가 반전되는걸 파악하지 못했다면, 문맥에서 특정 단어들에 의존하고 있는게 아닌가 하는 생각이 들었다. attention 쪽에서 head 수를 늘려보는 의견을 받았다. 더 다양한 문맥 정보를 취합한다면, 반전 의미를 파악할 수 있지 않을까 생각했고, 시도를 결정했다.
 
-## 8. 개선사항 적용 결과
-### 8.1 Linear-Layer 추가
+## 7. 개선사항 적용 결과
+### 7.1 Linear-Layer 추가
 ![add-linear-layer](figures/sentiment_affine_drop02_train35000_ep10.png)
 
-### 8.2 context_length 증가
+### 7.2 context_length 증가
 ![add-context-length](figures/sentiment_basic_ctx256.png)
 
-### 8.3 attention head 증가
+### 7.3 attention head 증가
 ![add-attention-head](figures/sentiment_heads8_train35000_ep20.png)
 
-### 8.4 결과 분석
+### 7.4 결과 분석
 여러번 시도를 해봤지만, 의미있는 변화를 찾기는 어려웠다. 
 아직 원인을 제대로 찾지 못했고, 가장 쉬운 방법은 사전 훈련을 더 진행해, 모델 기본 성능 자체를 올리는 것이 가장 좋을 것 같다는 판단이 들었다.
