@@ -106,8 +106,7 @@
 | low lr | 1e-5 | 10 | 10 | 8 | 0.4818 | 0.7680 | 0.7896 |
 | mid lr | 5e-5 | 20 | 6 | 4 | 0.4590 | 0.7855 | 0.8012 |
 
-## 7. Fine-tuning 결과
-![sentimental](figures/sentimental%20predict%20result.png)
+## 7. Fine-tuning
 
 ### 7.1 초기 fine-tuning 결과
 ![lr1e-4 result](figures/sentiment_pretrained_train35000_ep10.png)
@@ -125,6 +124,9 @@
 
 #### 7.2.3 dropout=0.3
 ![dropout0.3 result]
+
+#### 7.3 Fine-tuning 결과
+![sentimental](figures/sentimental%20predict%20result.png) 
 
 ## 8. 분석
 실성능은 80% 내외에서 머무르고 있다.
