@@ -136,6 +136,9 @@ class GPTForSequenceClassification(nn.Module):
         gpt_model: GPTModel,
         num_labels: int = 2,
         drop_rate: float = 0.1,
+        pooling: str = "last",
+        classifier_head: str = "linear",
+        classifier_hidden_dim: int | None = None,
     ):
         super().__init__()
         # 흐름(의사코드):
@@ -145,9 +148,27 @@ class GPTForSequenceClassification(nn.Module):
         self.gpt = gpt_model
         self.num_labels = num_labels
         self.pad_id = 0
+        if pooling not in {"last", "mean"}:
+            raise ValueError("pooling must be 'last' or 'mean'")
+        if classifier_head not in {"linear", "mlp"}:
+            raise ValueError("classifier_head must be 'linear' or 'mlp'")
+        if classifier_hidden_dim is not None and classifier_hidden_dim <= 0:
+            raise ValueError("classifier_hidden_dim must be positive")
+        self.pooling = pooling
+        self.classifier_head = classifier_head
         self.dropout = nn.Dropout(drop_rate)
         # ('책내용') 6장: LM head는 vocab 점수용이고, 감성 분류는 num_labels 점수용 head를 따로 붙인다.
-        self.classifier = nn.Linear(gpt_model.config["emb_dim"], num_labels)
+        emb_dim = gpt_model.config["emb_dim"]
+        if classifier_head == "mlp":
+            hidden_dim = classifier_hidden_dim or emb_dim
+            self.classifier = nn.Sequential(
+                nn.Linear(emb_dim, hidden_dim),
+                nn.GELU(),
+                nn.Dropout(drop_rate),
+                nn.Linear(hidden_dim, num_labels),
+            )
+        else:
+            self.classifier = nn.Linear(emb_dim, num_labels)
 
     def forward(
         self,
@@ -169,12 +190,20 @@ class GPTForSequenceClassification(nn.Module):
         hidden = self.gpt.get_hidden_states(input_ids)
         # pad가 아닌 token만 True가 됩니다. 문장 대표 벡터를 고를 때 padding을 제외하기 위한 mask입니다.
         non_pad = input_ids.ne(self.pad_id)
-        # 각 sample별 실제 token 개수를 세고, 마지막 유효 token의 index로 바꿉니다.
-        last_token_idx = non_pad.sum(dim=1).clamp(min=1) - 1
-        batch_idx = torch.arange(input_ids.size(0), device=input_ids.device)
-        # GPT의 모든 위치 hidden state 중 문장 끝 위치를 문장 대표 벡터로 사용합니다.
-        pooled = hidden[batch_idx, last_token_idx]
-        logits = self.classifier(self.dropout(pooled))
+        if self.pooling == "mean":
+            mask = non_pad.unsqueeze(-1)
+            token_counts = non_pad.sum(dim=1).clamp(min=1).unsqueeze(-1)
+            pooled = (hidden * mask).sum(dim=1) / token_counts
+        else:
+            # 각 sample별 실제 token 개수를 세고, 마지막 유효 token의 index로 바꿉니다.
+            last_token_idx = non_pad.sum(dim=1).clamp(min=1) - 1
+            batch_idx = torch.arange(input_ids.size(0), device=input_ids.device)
+            # GPT의 모든 위치 hidden state 중 문장 끝 위치를 문장 대표 벡터로 사용합니다.
+            pooled = hidden[batch_idx, last_token_idx]
+        if self.classifier_head == "mlp":
+            logits = self.classifier(pooled)
+        else:
+            logits = self.classifier(self.dropout(pooled))
 
         if labels is None:
             return logits

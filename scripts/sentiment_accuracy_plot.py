@@ -53,6 +53,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--repo-root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--tokenizer-path", type=Path, default=None)
     parser.add_argument("--checkpoint", type=str, default=None, help="GPT checkpoint path, or 'auto'.")
+    parser.add_argument("--resume-finetune", type=str, default=None, help="Sentiment checkpoint path to resume from.")
     parser.add_argument("--device", choices=["auto", "cuda", "cpu"], default="auto")
     parser.add_argument("--require-cuda", action="store_true")
     parser.add_argument("--epochs", type=int, default=None)
@@ -65,6 +66,9 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--weight-decay", type=float, default=0.1)
     parser.add_argument("--backbone-dropout", type=float, default=0.1, help="Dropout used inside the GPT backbone during fine-tuning.")
     parser.add_argument("--classifier-dropout", type=float, default=0.1, help="Dropout before the sentiment classifier head.")
+    parser.add_argument("--classifier-head", choices=["linear", "mlp"], default="linear", help="Sentiment classifier head architecture.")
+    parser.add_argument("--classifier-hidden-dim", type=int, default=None, help="Hidden dimension for --classifier-head mlp. Defaults to emb_dim.")
+    parser.add_argument("--pooling", choices=["last", "mean"], default="last", help="Sentence pooling strategy for classification.")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--metrics-path", type=Path, default=Path("logs/sentiment_accuracy_metrics.jsonl"))
@@ -183,6 +187,27 @@ def load_backbone_checkpoint(model, checkpoint_arg: str | None, repo_root: Path,
     return checkpoint_path
 
 
+def load_finetune_checkpoint(model, optimizer, checkpoint_arg: str, repo_root: Path, device) -> tuple[Path, int, list[dict[str, float]], dict[str, float] | None]:
+    checkpoint_path = resolve_output_path(repo_root, Path(checkpoint_arg))
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(f"Fine-tune checkpoint not found: {checkpoint_path}")
+
+    import torch
+
+    checkpoint = torch.load(checkpoint_path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+    last_epoch = int(checkpoint.get("epoch", 0))
+    history = list(checkpoint.get("history", []))
+    test_metrics = checkpoint.get("test")
+    print(f"resume fine-tune: {checkpoint_path} epoch={last_epoch}")
+    return checkpoint_path, last_epoch + 1, history, test_metrics
+
+
+def get_optimizer_lr(optimizer) -> float:
+    return float(optimizer.param_groups[0]["lr"])
+
+
 def make_gpt_config(config: dict[str, Any], vocab_size: int) -> dict[str, Any]:
     return {
         "vocab_size": vocab_size,
@@ -223,17 +248,25 @@ def make_run_dir(
     lr: float,
     backbone_dropout: float,
     classifier_dropout: float,
+    classifier_head: str,
+    classifier_hidden_dim: int | None,
+    pooling: str,
     seed: int,
 ) -> Path:
     root = resolve_output_path(repo_root, checkpoint_dir)
     if run_name is None:
         backbone_dropout_label = f"_gptdrop{backbone_dropout:g}" if backbone_dropout != 0.1 else ""
         classifier_dropout_label = f"_clsdrop{classifier_dropout:g}" if classifier_dropout != 0.1 else ""
+        classifier_head_label = ""
+        if classifier_head != "linear":
+            classifier_head_label = f"_head{classifier_head}"
+            if classifier_hidden_dim is not None:
+                classifier_head_label += f"{classifier_hidden_dim}"
         settings = (
             f"{run_level}_ctx{config['context_length']}_emb{config['emb_dim']}"
             f"_L{config['n_layers']}_H{config['n_heads']}_bs{batch_size}"
-            f"_lr{lr:g}{backbone_dropout_label}{classifier_dropout_label}"
-            f"_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
+            f"_lr{lr:g}{backbone_dropout_label}{classifier_dropout_label}{classifier_head_label}"
+            f"_pool{pooling}_train{train_limit}_val{val_limit}_ep{epochs}_seed{seed}"
         )
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         run_name = f"{settings}_{timestamp}"
@@ -260,6 +293,7 @@ def write_run_config(
         "require_cuda": args.require_cuda,
         "tokenizer_path": str(tokenizer_path),
         "loaded_checkpoint": str(loaded_checkpoint) if loaded_checkpoint is not None else None,
+        "resume_finetune": args.resume_finetune,
         "gpt_config": gpt_config,
         "limits": limits,
         "batch_size": batch_size,
@@ -268,6 +302,9 @@ def write_run_config(
         "weight_decay": args.weight_decay,
         "backbone_dropout": args.backbone_dropout,
         "classifier_dropout": args.classifier_dropout,
+        "classifier_head": args.classifier_head,
+        "classifier_hidden_dim": args.classifier_hidden_dim,
+        "pooling": args.pooling,
         "seed": args.seed,
         "checkpoint_every": args.checkpoint_every,
         "early_stopping": {
@@ -294,17 +331,15 @@ def save_sentiment_checkpoint(
     import torch
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "epoch": epoch,
-            "history": history,
-            "test": test_metrics,
-            "gpt_config": gpt_config,
-        },
-        path,
-    )
+    payload = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "epoch": epoch,
+        "history": history,
+        "test": test_metrics,
+        "gpt_config": gpt_config,
+    }
+    torch.save(payload, path)
 
 
 def print_progress(
@@ -543,8 +578,19 @@ def run() -> None:
     device = resolve_device(torch, args.device, args.require_cuda)
     gpt_config = make_gpt_config(config, actual_vocab_size)
     backbone = GPTModel(gpt_config)
-    loaded_checkpoint = load_backbone_checkpoint(backbone, args.checkpoint, repo_root, device)
-    clf_model = GPTForSequenceClassification(backbone, num_labels=2, drop_rate=args.classifier_dropout).to(device)
+    loaded_checkpoint = None
+    if args.resume_finetune is None:
+        loaded_checkpoint = load_backbone_checkpoint(backbone, args.checkpoint, repo_root, device)
+    else:
+        print("checkpoint: skipped backbone load because --resume-finetune was provided")
+    clf_model = GPTForSequenceClassification(
+        backbone,
+        num_labels=2,
+        drop_rate=args.classifier_dropout,
+        pooling=args.pooling,
+        classifier_head=args.classifier_head,
+        classifier_hidden_dim=args.classifier_hidden_dim,
+    ).to(device)
     run_dir = make_run_dir(
         repo_root,
         args.checkpoint_dir,
@@ -558,6 +604,9 @@ def run() -> None:
         args.lr,
         args.backbone_dropout,
         args.classifier_dropout,
+        args.classifier_head,
+        args.classifier_hidden_dim,
+        args.pooling,
         args.seed,
     )
     run_config_path = write_run_config(
@@ -610,6 +659,18 @@ def run() -> None:
 
     optimizer = torch.optim.AdamW(clf_model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
     history: list[dict[str, float]] = []
+    resume_finetune_path: Path | None = None
+    start_epoch = 1
+    test_metrics: dict[str, float] | None = None
+    if args.resume_finetune is not None:
+        resume_finetune_path, start_epoch, history, test_metrics = load_finetune_checkpoint(
+            clf_model,
+            optimizer,
+            args.resume_finetune,
+            repo_root,
+            device,
+        )
+
     early_stopping_patience = max(0, args.early_stopping_patience)
     early_stopping_enabled = early_stopping_patience > 0
     best_metric = args.early_stopping_metric if early_stopping_enabled else "val_accuracy"
@@ -625,9 +686,39 @@ def run() -> None:
     early_stopping_reason: str | None = None
     best_checkpoint_path = run_dir / "best.pt"
     final_checkpoint_path = run_dir / "final.pt"
-    test_metrics: dict[str, float] | None = None
+    for row in history:
+        row_epoch = int(row.get("epoch", 0))
+        val_loss = float(row["val_loss"])
+        val_acc = float(row["val_accuracy"])
+        best_val_loss = min(best_val_loss, val_loss)
+        best_val_acc = max(best_val_acc, val_acc)
+        current_metric_value = val_loss if best_metric == "val_loss" else val_acc
+        improved = metric_improved(
+            best_metric,
+            current_metric_value,
+            best_metric_value,
+            args.early_stopping_min_delta if early_stopping_enabled else 0.0,
+        )
+        if improved:
+            best_metric_value = current_metric_value
+            best_epoch = row_epoch
+            best_checkpoint_val_loss = val_loss
+            best_checkpoint_val_acc = val_acc
+            epochs_without_improvement = 0
+        elif early_stopping_enabled:
+            epochs_without_improvement += 1
+        epochs_completed = max(epochs_completed, row_epoch)
 
-    for epoch in range(1, epochs + 1):
+    if start_epoch > 1:
+        metric_display = f"{best_metric_value:.4f}" if best_metric_value is not None else "n/a"
+        print(
+            f"resume state: start_epoch={start_epoch}, best_epoch={best_epoch}, "
+            f"{best_metric}={metric_display}, "
+            f"patience={epochs_without_improvement}/{early_stopping_patience}"
+        )
+
+    for epoch in range(start_epoch, epochs + 1):
+        epoch_lr = get_optimizer_lr(optimizer)
         train_loss, train_acc = train_epoch_with_progress(
             clf_model,
             train_loader,
@@ -646,6 +737,7 @@ def run() -> None:
                 "event": "train_epoch",
                 "split": "train",
                 "epoch": epoch,
+                "lr": epoch_lr,
                 "loss": train_loss,
                 "accuracy": train_acc,
                 "num_examples": len(train_data),
@@ -669,25 +761,27 @@ def run() -> None:
                 "event": "evaluate",
                 "split": "val",
                 "epoch": epoch,
+                "lr": epoch_lr,
                 "loss": val_loss,
                 "accuracy": val_acc,
                 "num_examples": len(val_data),
             },
         )
-        history.append(
-            {
-                "epoch": epoch,
-                "train_loss": train_loss,
-                "train_accuracy": train_acc,
-                "val_loss": val_loss,
-                "val_accuracy": val_acc,
-            }
-        )
+        epoch_history = {
+            "epoch": epoch,
+            "lr": epoch_lr,
+            "train_loss": train_loss,
+            "train_accuracy": train_acc,
+            "val_loss": val_loss,
+            "val_accuracy": val_acc,
+        }
+        history.append(epoch_history)
         epochs_completed = epoch
         best_val_loss = min(best_val_loss, val_loss)
         best_val_acc = max(best_val_acc, val_acc)
         print(
             f"epoch {epoch}: "
+            f"lr={epoch_lr:g}, "
             f"train loss={train_loss:.4f}, train acc={train_acc:.4f}, "
             f"val loss={val_loss:.4f}, val acc={val_acc:.4f}"
         )
@@ -791,6 +885,7 @@ def run() -> None:
         "device": str(device),
         "tokenizer_path": str(tokenizer_path),
         "loaded_checkpoint_path": str(loaded_checkpoint) if loaded_checkpoint is not None else None,
+        "resume_finetune_checkpoint_path": str(resume_finetune_path) if resume_finetune_path is not None else None,
         "checkpoint_run_dir": str(run_dir),
         "run_config_path": str(run_config_path),
         "best_checkpoint_path": str(best_checkpoint_path),
@@ -807,6 +902,9 @@ def run() -> None:
         "batch_size": batch_size,
         "backbone_dropout": args.backbone_dropout,
         "classifier_dropout": args.classifier_dropout,
+        "classifier_head": args.classifier_head,
+        "classifier_hidden_dim": args.classifier_hidden_dim,
+        "pooling": args.pooling,
         "epochs": epochs,
         "epochs_completed": epochs_completed,
         "early_stopping": {
