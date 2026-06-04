@@ -3,7 +3,7 @@ data/ratings_train.txt
 data/ratings_test.txt
 data/nsmc_lm_*.txt
 data/nsmc_sentiment_*.jsonl
-data/vocab_*.json
+# data/vocab_*.json
 data/*.jsonl
 
 # Python
@@ -31,9 +31,12 @@ env/
 htmlcov/
 
 # 체크포인트
-*.pt
-*.pth
-checkpoints/
+# *.pt
+# *.pth
+# checkpoints/
+
+# 학습 기록(로컬/Colab 실행 결과)
+logs/
 
 # 학습 기록(로컬/Colab 실행 결과)
 logs/
