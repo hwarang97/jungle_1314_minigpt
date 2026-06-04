@@ -1,0 +1,24 @@
+{
+  "run_level": "BASIC",
+  "config": {
+    "vocab_size": 3000,
+    "context_length": 128,
+    "emb_dim": 192,
+    "n_heads": 4,
+    "n_layers": 4,
+    "drop_rate": 0.1,
+    "qkv_bias": false
+  },
+  "batch_size": 32,
+  "epochs": 20,
+  "train_chars": 1500000,
+  "val_chars": 200000,
+  "lr": 0.0003,
+  "weight_decay": 0.01,
+  "eval_freq": 100,
+  "eval_iter": 20,
+  "seed": 42,
+  "tokenizer_path": "C:\\home\\dolggul2\\crafton\\week13-14\\SW-AI-W1314-MINIGPT\\data\\tokenizer.json",
+  "resume": null,
+  "created_at": "2026-06-03T15:14:37"
+}

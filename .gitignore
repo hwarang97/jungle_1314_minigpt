@@ -34,9 +34,12 @@ htmlcov/
 # *.pt
 # *.pth
 # checkpoints/
+<<<<<<< HEAD
 
 # 학습 기록(로컬/Colab 실행 결과)
 logs/
+=======
+>>>>>>> dev
 
 # 학습 기록(로컬/Colab 실행 결과)
 logs/
